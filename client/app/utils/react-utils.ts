@@ -16,17 +16,18 @@
  */
 
 /// <reference path="../../typedefs/react/react.d.ts" />
-/// <reference path="../plain-old-javascript.d.ts" />
 /// <reference path="../prelude.ts" />
+/// <reference path="utils.ts" />
+
+//------------------------------------------------------------------------------
+   namespace debiki2 {
+//------------------------------------------------------------------------------
 
 
-var reactCreateFactory = React['createFactory'];
-var isServerSide = debiki2.isServerSide;
-
-var ReactSelect; // lazy loaded.
+export var Link = reactCreateFactory(ReactRouter.Link);
 
 
-function createComponent(componentDefinition) { // oops should obviously be named createFactory
+export function createComponent(componentDefinition) { // oops should obviously be named createFactory
   if (isServerSide()) {
     // The mere presence of these functions cause an unknown error when rendering
     // React-Router server side. So remove them; they're never called server side anyway.
@@ -38,18 +39,30 @@ function createComponent(componentDefinition) { // oops should obviously be name
 }
 
 
-function createClassAndFactory(componentDefinition) { // rename createComponent to this
+export function createClassAndFactory(componentDefinition) { // rename createComponent to this
   return createComponent(componentDefinition);
 }
 
 
-/**
- * An ISO date that shall not be converted to "X time ago" format.
- * It doesn't really do anything, but use it so that it'll be easy to find all
- * date formatting code.
- */
-function dateTimeFix(isoDate: string) {
-  return isoDate;
+export var NavLink = createComponent({
+  contextTypes: {
+    router: React.PropTypes.object
+  },
+
+  render: function () {
+    var isActive = this.context.router.isActive(this.props.to, true);
+    var className = isActive ? 'active ' : '';
+    if (this.props.listItemClassName) className += this.props.listItemClassName;
+
+    return (
+      r.li({ className: className },
+        Link(this.props, this.props.children)));
+  }
+});
+
+
+export function whenMsToIsoDate(whenMs: number) {
+  return new Date(whenMs).toISOString().replace(/T/, ' ')
 }
 
 /**
@@ -58,7 +71,8 @@ function dateTimeFix(isoDate: string) {
  * just below.  The server inculdes only ISO dates, not "x time ago", in its HTML,
  * so that it can be cached.
  */
-function timeAgo(isoDate: string, clazz?: string) {
+export function timeAgo(whenMs: number, clazz?: string) {
+  var isoDate = whenMsToIsoDate(whenMs);
   return r.span({ className: 'dw-ago ' + (clazz || '') }, isoDate);
 }
 
@@ -66,12 +80,18 @@ function timeAgo(isoDate: string, clazz?: string) {
  * Like timeAgo(isoDate) but results in just "5h" instead of "5 hours ago".
  * That is, uses only one single letter, instead of many words.
  */
-function prettyLetterTimeAgo(isoDate: string, clazz?: string) {
+export function prettyLetterTimeAgo(whenMs: number, clazz?: string) {
+  var isoDate = whenMsToIsoDate(whenMs);
   return r.span({ className: 'dw-ago-ltr ' + (clazz || '') }, isoDate);
 }
 
-function timeExact(isoDate: string, clazz?: string) {
+export function timeExact(whenMs: number, clazz?: string) {
+  return timeAgo(whenMs, clazz); /*
+  // This no longer works, because moment.js was moved to more-bundle.js, so    [E5F29V]
+  // cannot convert to e.g. "Yesterday 05:30 PM". Instead, show "4 hours ago" or sth like that.
+  var isoDate = whenMsToIsoDate(whenMs);
   return r.span({ className: 'esTimeExact ' + (clazz || '') }, isoDate);
+  */
 }
 
 
@@ -83,16 +103,18 @@ function timeExact(isoDate: string, clazz?: string) {
  * that have been processed already.
  */
 // COULD move to page/hacks.ts
-function processTimeAgo(selector?: string) {
+export function processTimeAgo(selector?: string) {
   selector = selector || '';
   var timeDoneClass = 'esTimeDone';
+
   // First handle all long version timestamps (don't end with -ltr ("letter")).
   // Result: e.g. "5 hours ago"
   $(selector + ' .dw-ago:not(.' + timeDoneClass + ')').each(function() {
     var $this = $(this);
     var isoDate = $this.text();
-    // Try to remove moment() from the default JS bundle? [6KFW02] Use instead: http://stackoverflow.com/a/9363445/694469 ?
-    var timeAgoString = moment(isoDate).fromNow();
+    var then = debiki2['isoDateStringToMillis'](isoDate); // typescript compilation error without []
+    var now = Date.now();
+    var timeAgoString = debiki.prettyDuration(then, now);
     $this.text(timeAgoString);
     $this.addClass(timeDoneClass);
     // But don't add any title tooltip attr, see [85YKW20] above.
@@ -103,7 +125,7 @@ function processTimeAgo(selector?: string) {
   $(selector + ' .dw-ago-ltr:not(.' + timeDoneClass + ')').each(function() {
     var $this = $(this);
     var isoDate = $this.text();
-    var then = moment(isoDate).valueOf(); // or exclude Moment from default JS bundle? [6KFW02]
+    var then = debiki2['isoDateStringToMillis'](isoDate); // typescript compilation error without []
     var now = Date.now();
     var durationLetter = debiki.prettyLetterDuration(then, now);
     $this.text(durationLetter);
@@ -113,30 +135,40 @@ function processTimeAgo(selector?: string) {
     $this.addClass(timeDoneClass);
   });
 
+  // This no longer works, here in slim-bundle.js, because moment.js moved to more-bundle.js [E5F29V]
   // & all exact timestamps (end with -exact).
   // Result: e.g. "Yesterday 12:59 am", or, if today, only "13:59".
+  /*
   $(selector + ' .esTimeExact:not(.' + timeDoneClass + ')').each(function() {
     var $this = $(this);
     var isoDate = $this.text();
-    var when = moment(isoDate);  // or exclude Moment from default JS bundle? [6KFW02]
-    var includeDay = when.isBefore(moment().startOf('day'));
+    var m = moment(isoDate);  // or exclude Moment from default JS bundle? [6KFW02]
+    var whenText;
+    if (m.year() !== debiki.currentYear) {
+      whenText = m.format('ll'); // e.g. "Sep 4 2015"
+    }
+    else if (m.isBefore(moment().startOf('day'))) {
+      whenText = m.format('MMM D'); // e.g. "Sep 4"  (MMMM = September, not Sep)
+    }
+    else {
+      whenText = m.format('LT');  // e.g. 8:30 PM
+    }
     // getTimezoneOffset() returns -60 (not +60) for UTC+1. Weird. So use subtract(..).
-    //when = when.subtract((new Date()).getTimezoneOffset(), 'minutes'); -- Oops not needed.
-    var dayHourMinute = includeDay ? when.calendar() : when.format('LT');
-    $this.text(dayHourMinute);
+    //m = m.subtract((new Date()).getTimezoneOffset(), 'minutes'); -- Oops not needed.
+    $this.text(whenText);
     $this.addClass(timeDoneClass);
     // But don't add any title tooltip attr, see [85YKW20] above.
   });
+  */
 }
 
+//------------------------------------------------------------------------------
+   }
+//------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
    module debiki2.utils {
 //------------------------------------------------------------------------------
-
-export var createComponent = window['createComponent'];
-export var createClassAndFactory = window['createClassAndFactory'];
-export var reactCreateFactory = React['createFactory'];
 
 export function makeMountNode() {
   return $('<div>').appendTo('body')[0];

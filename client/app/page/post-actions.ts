@@ -23,31 +23,22 @@
 /// <reference path="../utils/react-utils.ts" />
 /// <reference path="../utils/DropdownModal.ts" />
 /// <reference path="../util/ExplainingDropdown.ts" />
-/// <reference path="../dialogs.ts" />
 /// <reference path="../help/help.ts" />
-/// <reference path="../editor/title-editor.ts" />
-/// <reference path="../edit-history/edit-history-dialog.ts" />
 /// <reference path="../topbar/topbar.ts" />
 /// <reference path="../page-methods.ts" />
-/// <reference path="../page-dialogs/wikify-dialog.ts" />
-/// <reference path="../page-dialogs/delete-post-dialog.ts" />
-/// <reference path="../page-dialogs/move-posts-dialog.ts" />
-/// <reference path="../page-dialogs/see-wrench-dialog.ts" />
-/// <reference path="../page-dialogs/share-dialog.ts" />
-/// <reference path="../page-dialogs/tags-dialog.ts" />
 /// <reference path="../help/help.ts" />
 /// <reference path="../model.ts" />
+/// <reference path="../rules.ts" />
 /// <reference path="../Server.ts" />
 /// <reference path="chat.ts" />
+/// <reference path="../more-bundle-not-yet-loaded.ts" />
 
 //------------------------------------------------------------------------------
-   module debiki2.page {
+   namespace debiki2.page {
 //------------------------------------------------------------------------------
 
 var React = window['React']; // TypeScript file doesn't work
 var r = React.DOM;
-var $: JQueryStatic = debiki.internal.$;
-var ReactBootstrap: any = window['ReactBootstrap'];
 var DropdownModal = utils.DropdownModal;
 var ExplainingListItem = util.ExplainingListItem;
 
@@ -72,9 +63,12 @@ export function openMoreDropdown(store, post, moreButton) {
 
 
 export var NoCommentsPageActions = createComponent({
+  displayName: 'NoCommentsPageActions',
+
   onEditClick: function(event) {
     debiki2.ReactActions.editPostWithNr(this.props.post.postId);
   },
+
   render: function() {
     var me: Myself = this.props.me;
     var post: Post = this.props.post;
@@ -94,7 +88,21 @@ export var NoCommentsPageActions = createComponent({
 });
 
 
+export function makeReplyBtnTitle(store: Store, post: Post, isAppendReplyButton: boolean) {
+  if (post.postId !== BodyId)
+    return "Reply";
+
+  switch (store.pageRole) {
+    case PageRole.Critique: return "Give Critique"; // [plugin]
+    default:
+      return isAppendReplyButton ? "Reply to the Original Post" : "Reply";
+  }
+}
+
+
 export var PostActions = createComponent({
+  displayName: 'PostActions',
+
   onAcceptAnswerClick: function() {
     debiki2.ReactActions.acceptAnswer(this.props.post.uniqueId);
   },
@@ -113,23 +121,13 @@ export var PostActions = createComponent({
     debiki2.ReactActions.editPostWithNr(this.props.post.postId);
   },
   onLinkClick: function(event) {
-    pagedialogs.openShareDialog(this.props.post, event.target);
+    morebundle.openShareDialog(this.props.post, event.target);
   },
   onLikeClick: function(event) {
     loginIfNeededThen(LoginReason.LoginToLike, this.props.post.postNr, () => {
       var toggleOn = !me_hasVoted(this.props.store.me, this.props.post.postId, 'VoteLike');
       debiki.internal.toggleVote(this.props.post.postId, 'VoteLike', toggleOn);
     });
-  },
-
-  makeReplyBtnTitle: function(post: Post) {
-    if (post.postId !== BodyId)
-      return "Reply";
-
-    switch (this.props.store.pageRole) {
-      case PageRole.Critique: return "Give Critique"; // [plugin]
-      default: return "Reply";
-    }
   },
 
   openMoreVotesDropdown: function(event) {
@@ -150,6 +148,7 @@ export var PostActions = createComponent({
     var isDone = store.pageDoneAtMs && (store.pageRole === PageRole.Problem ||
       store.pageRole === PageRole.Idea || store.pageRole === PageRole.ToDo);
 
+    // SHOULD show at least the edit button, so one can edit one's unapproved post. [27WKTU02]
     if (!post.isApproved) // what?:  && !post.text)
       return null;
 
@@ -193,7 +192,7 @@ export var PostActions = createComponent({
     else if (!deletedOrCollapsed) {
       replyButton =
           r.a({ className: 'dw-a dw-a-reply icon-reply', onClick: this.onReplyClick },
-            this.makeReplyBtnTitle(post));
+            makeReplyBtnTitle(store, post, false));
     }
 
     // Show a close button for unanswered questions and pending to-dos, and a reopen
@@ -276,14 +275,15 @@ export var PostActions = createComponent({
             title: "Like this", onClick: this.onLikeClick });
     }
 
-    var editOwnPostButton = deletedOrCollapsed || !isOwnPost
-        ? null
-        : r.a({ className: 'dw-a dw-a-edit icon-edit', title: "Edit",
+
+    var mayEdit = !deletedOrCollapsed && (isStaff(me) || isOwnPost || (
+          me.isAuthenticated && post.postType === PostType.CommunityWiki));
+    var editButton = !mayEdit ? null :
+        r.a({ className: 'dw-a dw-a-edit icon-edit', title: "Edit",
               onClick: this.onEditClick });
 
-    var link = deletedOrCollapsed
-        ? null
-        : r.a({ className: 'dw-a dw-a-link icon-link', title: "Link to this post",
+    var link = deletedOrCollapsed ? null :
+        r.a({ className: 'dw-a dw-a-link icon-link', title: "Link to this post",
               onClick: this.onLinkClick });
 
     // Build a More... dropdown, but if it would have only one single menu item, inline
@@ -304,7 +304,7 @@ export var PostActions = createComponent({
     var tagList;
     if (post.tags && post.tags.length) {
       var tags = post.tags.map((label) => {
-        return r.li({}, r.a({ className: 'esTg' }, label));
+        return r.li({ key: label }, r.a({ className: 'esTg' }, label));
       });
       tagList = r.ul({ className: 'esPA_Ts' }, tags);
     }
@@ -316,7 +316,7 @@ export var PostActions = createComponent({
         flagBtn,
         moreDropdown,
         link,
-        editOwnPostButton,
+        editButton,
         downvotesDropdown,
         likeVoteButton,
         numBurysText,
@@ -331,6 +331,8 @@ export var PostActions = createComponent({
 
 // some dupl code [6KUW24]
 var MoreVotesDropdownModal = createComponent({
+  displayName: 'MoreVotesDropdownModal',
+
   mixins: [StoreListenerMixin],
 
   getInitialState: function () {
@@ -345,12 +347,14 @@ var MoreVotesDropdownModal = createComponent({
   },
 
   openForAt: function(post: Post, at) {
-    var rect = at.getBoundingClientRect();
+    var rect = cloneRect(at.getBoundingClientRect());
+    rect.left -= 140; // then modal position looks better
+    rect.right += 100;
     this.setState({
       isOpen: true,
       post: post,
-      atX: rect.left - 140,
-      atY: rect.bottom,
+      windowWidth: window.innerWidth,
+      buttonRect: rect,
     });
   },
 
@@ -428,14 +432,17 @@ var MoreVotesDropdownModal = createComponent({
     var state = this.state;
     var content = state.isOpen ? this.makeVoteButtons() : null;
     return (
-      DropdownModal({ show: state.isOpen, onHide: this.close, atX: state.atX, atY: state.atY,
-          pullLeft: true, className: 'esDwnvts' }, content));
+      DropdownModal({ show: state.isOpen, onHide: this.close,
+          atRect: state.buttonRect, windowWidth: state.windowWidth,
+          className: 'esDwnvts', showCloseButton: true }, content));
   }
 });
 
 
 // some dupl code [6KUW24]
 var MoreDropdownModal = createComponent({
+  displayName: 'MoreDropdownModal',
+
   getInitialState: function () {
     return {
       isOpen: false,
@@ -444,23 +451,17 @@ var MoreDropdownModal = createComponent({
 
   // dupl code [6KUW24]
   openForAt: function(store, post, at) {
-    var rect = at.getBoundingClientRect();
     this.setState({
       isOpen: true,
       store: store,
       post: post,
-      atX: rect.right,
-      atY: rect.bottom,
+      windowWidth: window.innerWidth,
+      buttonRect: cloneRect(at.getBoundingClientRect()),
     });
   },
 
   close: function() {
     this.setState({ isOpen: false });
-  },
-
-  onEditClick: function(event) {
-    debiki2.ReactActions.editPostWithNr(this.state.post.postId);
-    this.close();
   },
 
   onFlagClick: function(event) {
@@ -469,17 +470,17 @@ var MoreDropdownModal = createComponent({
   },
 
   openTagsDialog: function(event) {
-    pagedialogs.openTagsDialog(this.state.store, this.state.post);
+    morebundle.openTagsDialog(this.state.store, this.state.post);
     this.close();
   },
 
   onDeleteClick: function(event) {
-    debiki2.pagedialogs.getDeletePostDialog().open(this.state.post);
+    morebundle.openDeletePostDialog(this.state.post);
     this.close();
   },
 
   onWikifyClick: function(event) {
-    debiki2.pagedialogs.getWikifyDialog().open(this.state.post);
+    morebundle.openWikifyDialog(this.state.post);
     this.close();
   },
 
@@ -501,7 +502,7 @@ var MoreDropdownModal = createComponent({
     this.close();
   }, */
   onMoveClick: function(event) {
-    pagedialogs.openMovePostsDialog(this.state.store, this.state.post, this.close);
+    morebundle.openMovePostsDialog(this.state.store, this.state.post, this.close);
   },
   onSeeWrenchClick: function(event) {
     debiki2.pagedialogs.openSeeWrenchDialog();
@@ -526,16 +527,6 @@ var MoreDropdownModal = createComponent({
     var moreLinks = [];
     var isOwnPost = post.authorIdInt === me.userId;
     var isMindMap = store.pageRole === PageRole.MindMap;
-
-    if (!isOwnPost) {
-      var mayEdit = isStaff(me) || (
-        me.isAuthenticated && post.postType === PostType.CommunityWiki);
-      if (mayEdit) {
-        moreLinks.push(
-          r.a({ className: 'dw-a dw-a-edit icon-edit', onClick: this.onEditClick, key: 'ed' },
-            "Edit"));
-      }
-    }
 
     // ----- Report
 
@@ -645,7 +636,8 @@ var MoreDropdownModal = createComponent({
     var state = this.state;
     var content = state.isOpen ? this.makeButtons() : null;
     return (
-      DropdownModal({ show: state.isOpen, onHide: this.close, atX: state.atX, atY: state.atY },
+      DropdownModal({ show: state.isOpen, onHide: this.close, showCloseButton: true,
+          atRect: state.buttonRect, windowWidth: state.windowWidth },
         content));
   }
 });
@@ -653,14 +645,13 @@ var MoreDropdownModal = createComponent({
 
 function flagPost(post: Post) {
   loginIfNeededThen('LoginToFlag', post.postId, () => {
-    debiki2.getFlagDialog().open(post.postId);
+    morebundle.openFlagDialog(post.postId);
   });
 }
 
 
-function loginIfNeededThen(loginToWhat, postNr: PostNr, callback) {
-  login.loginIfNeeded(
-    loginToWhat, debiki.internal.makeReturnToPostUrlForVerifEmail(postNr), callback);
+function loginIfNeededThen(loginToWhat, postNr: PostNr, success: () => void) {
+  morebundle.loginIfNeededReturnToPost(loginToWhat, postNr, success);
 }
 
 //------------------------------------------------------------------------------

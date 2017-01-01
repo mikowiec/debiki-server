@@ -22,13 +22,15 @@ import com.debiki.core._
 import debiki.dao.SystemDao
 import java.{util => ju}
 import org.elasticsearch.action.bulk.BulkResponse
-import org.elasticsearch.action.{ActionListener, ActionFuture}
-import org.elasticsearch.action.index.{IndexRequestBuilder, IndexResponse, IndexRequest}
+import org.elasticsearch.action.ActionListener
+import org.elasticsearch.action.index.{IndexRequestBuilder, IndexResponse}
 import org.{elasticsearch => es}
 import play.{api => p}
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits.global
 import Prelude._
+import org.postgresql.util.PSQLException
+import play.api.Logger
 
 
 
@@ -141,7 +143,7 @@ class IndexingActor(
   private val systemDao: SystemDao) extends Actor {
 
   val indexCreator = new IndexCreator()
-
+  val postsRecentlyIndexed = new java.util.concurrent.ConcurrentLinkedQueue[SiteIdAndPost]
 
   def receive = {
     case IndexStuff =>
@@ -149,11 +151,14 @@ class IndexingActor(
       // 2) insert into the index queue entries for stuff in those languages. 3) create indexes.
       val newIndexes: Seq[IndexSettingsAndMappings] = indexCreator.createIndexesIfNeeded(client)
       enqueueEverythingInLanguages(newIndexes.map(_.language).toSet)
+      deleteAlreadyIndexedPostsFromQueue()
       loadAndIndexPendingPosts()
     case ReplyWhenDoneIndexing =>
       ???
       // If StuffToIndex.postsBySite.isEmpty, then: sender ! "Done indexing."
       // Else, somehow wait untily until isEmpty, then reply.
+    case PoisonPill =>
+      deleteAlreadyIndexedPostsFromQueue()
   }
 
 
@@ -171,24 +176,29 @@ class IndexingActor(
         stuffToIndex.isPageDeleted(siteId, post.pageId) || !post.isVisible
       })
       unindexPosts(siteId, toUnindex)
-      indexPosts(siteId, toIndex)
+      indexPosts(siteId, toIndex, stuffToIndex)
     }
   }
 
 
-  private def indexPosts(siteId: SiteId, posts: Seq[Post]) {
+  private def indexPosts(siteId: SiteId, posts: Seq[Post], stuffToIndex: StuffToIndex) {
     if (posts.isEmpty)
       return
 
     // Later: Use the bulk index API.
     posts foreach { post =>
-      indexPost(post, siteId)
+      indexPost(post, siteId, stuffToIndex)
     }
   }
 
 
-  private def indexPost(post: Post, siteId: String) {
-    val doc = makeElasticSearchJsonDocFor(post, siteId)
+  private def indexPost(post: Post, siteId: String, stuffToIndex: StuffToIndex) {
+    val pageMeta = stuffToIndex.page(siteId, post.pageId) getOrElse {
+      Logger.warn(s"Not indexing s:$siteId/p:${post.uniqueId} — page gone, was just deleted?")
+      return
+    }
+    val tags = stuffToIndex.tags(siteId, post.uniqueId)
+    val doc = makeElasticSearchJsonDocFor(siteId, post, pageMeta.categoryId, tags)
     val docId = makeElasticSearchIdFor(siteId, post)
     val requestBuilder: IndexRequestBuilder =
       client.prepareIndex(IndexName, PostDocType, docId)
@@ -200,14 +210,39 @@ class IndexingActor(
     requestBuilder.execute(new ActionListener[IndexResponse] {
       def onResponse(response: IndexResponse) {
         p.Logger.debug("Indexed site:post " + docId)
-        // (This isn't the actor's thread. This is some thread controlled by ElasticSearch.)
-        systemDao.deleteFromIndexQueue(post, siteId)
+        // This isn't the actor's thread. This is some thread controlled by ElasticSearch.
+        // So don't call systemDao.deleteFromIndexQueue(post, siteId) from here
+        // — because then the index queue apparently gets updated by many threads
+        // at the same time, causing serialization errors (SQL state 40001).
+        // Instead, remember and delete later:
+        postsRecentlyIndexed.add(SiteIdAndPost(siteId, post))
       }
 
       def onFailure(throwable: Throwable) {
         p.Logger.error(i"Error when indexing siteId:postId: $docId", throwable)
       }
     })
+  }
+
+
+  private def deleteAlreadyIndexedPostsFromQueue() {
+    var sitePostIds = Vector[SiteIdAndPost]()
+    while (!postsRecentlyIndexed.isEmpty) {
+      sitePostIds +:= postsRecentlyIndexed.remove()
+    }
+    COULD_OPTIMIZE // batch delete all in one statement
+    sitePostIds foreach { siteIdAndPost =>
+      try systemDao.deleteFromIndexQueue(siteIdAndPost.post, siteIdAndPost.siteId)
+      catch {
+        case ex: PSQLException if ex.getSQLState == "40001" =>
+          p.Logger.error(
+            o"""PostgreSQL serialization error when deleting
+                siteId:postId: $siteIdAndPost from index queue [EdE40001IQ]""", ex)
+        case ex: Exception =>
+          p.Logger.error(
+            s"error when deleting siteId:postId: $siteIdAndPost from index queue [EdE5PKW20]", ex)
+      }
+    }
   }
 
 

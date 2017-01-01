@@ -3447,6 +3447,7 @@ html4.ATTRIBS = {
   'video::controls': 0,
   'video::height': 0,
   'video::loop': 0,
+  'video::autoplay': 0,   // added by kajmagnus
   'video::mediagroup': 5,
   'video::muted': 0,
   'video::poster': 1,
@@ -4645,7 +4646,10 @@ var html = (function(html4) {
            html4.ATTRIBS.hasOwnProperty(attribKey))) {
         atype = html4.ATTRIBS[attribKey];
       }
-      if (atype !== null) {
+      if (attribName === 'target' && value === '_blank') { // KajMagnus hack
+        // Allow (don't clear value).
+      }
+      else if (atype !== null) {
         switch (atype) {
           case html4.atype['NONE']: break;
           case html4.atype['SCRIPT']:
@@ -4832,16 +4836,8 @@ if (typeof window !== 'undefined') {
 
 
 /**
- * (Old comments below! I use Rhino no more, Nashorn instaed)
- *
- * Called from both Java and Javascript:
- * Implements Java interface compiledjs.HtmlSanitizerJS,
- * and is called by debiki.js.
- *
- * Placed in this file because this simplifies the compilation of all
- * this stuff to Java bytecode.
- *
- *  / KajMagnus@Debiki
+ * Placed in this file because it made sense long ago, with Rhino — which is no longer
+ * in use though. CLEAN_UP move to some .ts file instead /KajMagnus
  */
 function googleCajaSanitizeHtml(htmlTextUnsafe, allowClassAndIdAttr,
     allowDataAttr) {
@@ -4873,13 +4869,65 @@ function googleCajaSanitizeHtml(htmlTextUnsafe, allowClassAndIdAttr,
       }
       return '';
     }
-    return /^dw-/.test(token) ? '' : token;
+    // These are for ED's own classes and ids.
+    if (/^dw-/.test(token)) return '';  // old
+    if (/^ed-/.test(token)) return '';   // old
+    if (/^es[A-Z]/.test(token)) return '';   // current naming scheme is esWhatever
+    if (/^the[A-Z]/.test(token)) return '';  // ... or theWhatever, for id attrs
+    if (/^[a-z]?-/.test(token)) return '';   // in the future?: d-... or t-... or just -Whatever?...
+    if (/^[a-z]?_/.test(token)) return '';   // ... ok, s_, t_, and e_ will be the magic prefix.
+    return token;
   }
   function dataPolicy(attrName, value) {
     return allowDataAttr ? value : null;
   }
 
-  return html_sanitize(htmlTextUnsafe, uriPolicy, classAndIdPolicy, dataPolicy);
+  // Sanitize, using 2 different sanitizers. There might be security bugs in a sanitizer,
+  // but it's unlikely that two different sanitizers have the same bug(s). Gulpfile.js [6FKP40].
+  //
+  // For now, let's call sanitizeHtml (https://github.com/punkave/sanitize-html) from here,
+  // although this function is named googleCaja....  CLEAN_UP: create another function that
+  // calls first sanitizeHtml, then Caja
+  //
+  var sanitized = sanitizeHtml(htmlTextUnsafe, {
+    allowedTags: [
+      // Allowed by default
+      'h3', 'h4', 'h5', 'h6', 'blockquote', 'p', 'a', 'ul', 'ol',
+      'nl', 'li', 'b', 'i', 'u', 'strong', 'em', 'strike', 'code', 'hr', 'br', 'div',
+      'table', 'thead', 'caption', 'tbody', 'tr', 'th', 'td', 'pre',
+      // Why not included by default?
+      'span', 'small', 'pre', 'code', 'var', 'samp', 'kbd',
+      // Custom HTML pages
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      // HTML5
+      'aside', 'bdi', 'details', 'figcaption', 'figure', 'mark', 'rp',
+      'rt', 'ruby', 'summary', 'time', 'wbr',
+      // Media
+      'img', 'video', 'source', 'track',  // skip for now though: 'audio'
+      // Custom forms
+      'form', 'label', 'input', 'textarea', 'button', 'datalist', 'option'],
+    allowedAttributes: {
+      a: [ 'href', 'name', 'target' ],
+      img: ['width', 'height', 'src'],
+      video: ['width', 'height', 'src', 'controls', 'autoplay', 'loop'],
+      source: ['src', 'type'],
+      form: ['novalidate'], // *not* action= or method= though — handled by Javascript instead
+      label: ['for'],
+      input: ['type', 'name', 'placeholder', 'readonly', 'disabled', 'size', 'maxlength',
+        'autocomplete', 'pattern', 'title', 'required', 'step', 'min', 'max', 'multiple', 'list',
+        'width', 'height', 'value'],
+        // skip?: formtarget
+      textarea: ['name'],
+      button: ['type'],
+      '*': ['id', 'class'] // but not style=.., because of clickjacking. (Caja seems to remove
+      // Javascript from inside CSS (e.g. url(javascript:...)) and position:fixed, however
+      // Caja allows position:absolute so clickjacking would still be a little bit possbible.)
+    }
+    // allowedClasses: { elem: [...classes...] }
+  });
+
+  var superSanitized = html_sanitize(sanitized, uriPolicy, classAndIdPolicy, dataPolicy);
+  return superSanitized;
 }
 
 

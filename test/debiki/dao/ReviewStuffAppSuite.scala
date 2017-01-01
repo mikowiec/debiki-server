@@ -20,10 +20,7 @@ package debiki.dao
 import com.debiki.core._
 import com.debiki.core.Prelude._
 import debiki.{Globals, TextAndHtml}
-import io.efdi.server.Who
 import org.scalatest._
-import org.scalatestplus.play.OneAppPerSuite
-import play.api.test.FakeApplication
 
 
 class ReviewStuffAppSuite(randomString: String)
@@ -33,7 +30,7 @@ class ReviewStuffAppSuite(randomString: String)
   var nameCounter = 0
 
   class NestedPostsSuite extends FreeSpec with MustMatchers with BeforeAndAfterAll {
-    var thePageId: PageId = null
+    var thePageId: PageId = _
     lazy val theAdmin: User =  createPasswordOwner(s"aaddmm_${nextNameNr}_$r", dao)
     lazy val dao: SiteDao = Globals.siteDao(Site.FirstSiteId)
     lazy val categoryId: CategoryId =
@@ -47,13 +44,14 @@ class ReviewStuffAppSuite(randomString: String)
         anyCategoryId = Some(categoryId), anyFolder = Some("/"), anySlug = Some(""),
         titleTextAndHtml = TextAndHtml.testTitle("title_62952 $r"),
         bodyTextAndHtml = TextAndHtml.testBody("discussion_230593 $r"),
-        showId = true, Who(theAdmin.id, browserIdData)).thePageId
+        showId = true, Who(theAdmin.id, browserIdData), dummySpamRelReqStuff).thePageId
     }
 
     def testAdminsRepliesApproved(adminId: UserId, pageId: PageId) {
       for (i <- 1 to 10) {
         val result = dao.insertReply(TextAndHtml.testBody(s"reply_9032372 $r, i = $i"), pageId,
-          replyToPostNrs = Set(PageParts.BodyNr), PostType.Normal, Who(adminId, browserIdData))
+          replyToPostNrs = Set(PageParts.BodyNr), PostType.Normal,
+          Who(adminId, browserIdData), dummySpamRelReqStuff)
         result.post.isCurrentVersionApproved mustBe true
         result.post.approvedById mustBe Some(adminId)
       }
@@ -61,7 +59,8 @@ class ReviewStuffAppSuite(randomString: String)
 
     def reply(memberId: UserId, text: String): InsertPostResult = {
       dao.insertReply(TextAndHtml.testBody(text), thePageId,
-        replyToPostNrs = Set(PageParts.BodyNr), PostType.Normal, Who(memberId, browserIdData))
+        replyToPostNrs = Set(PageParts.BodyNr), PostType.Normal,
+        Who(memberId, browserIdData), dummySpamRelReqStuff)
     }
 
     def approve(reviewTask: ReviewTask): Unit = {
@@ -74,7 +73,8 @@ class ReviewStuffAppSuite(randomString: String)
         val task = transaction.loadPendingPostReviewTask(post.uniqueId) getOrElse {
           fail("No review task generated for post with text: " + post.currentSource)
         }
-        task.causedById mustBe post.createdById
+        task.createdById mustBe SystemUserId
+        task.maybeBadUserId mustBe post.createdById
         reasons.foreach(task.reasons must contain(_))
         task.createdAtRevNr mustBe Some(FirstRevisionNr)
         task.postId mustBe Some(post.uniqueId)

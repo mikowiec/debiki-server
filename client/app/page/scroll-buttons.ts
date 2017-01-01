@@ -18,6 +18,7 @@
 /// <reference path="../../typedefs/react/react.d.ts" />
 /// <reference path="../../typedefs/keymaster/keymaster.d.ts" />
 /// <reference path="../utils/react-utils.ts" />
+/// <reference path="../widgets.ts" />
 /// <reference path="../utils/DropdownModal.ts" />
 
 //------------------------------------------------------------------------------
@@ -25,10 +26,7 @@
 //------------------------------------------------------------------------------
 
 var keymaster: Keymaster = window['keymaster'];
-var d = { i: debiki.internal, u: debiki.v0.util };
 var r = React.DOM;
-var ReactBootstrap: any = window['ReactBootstrap'];
-var Button = React.createFactory(ReactBootstrap.Button);
 var calcScrollIntoViewCoordsInPageColumn = debiki2.utils.calcScrollIntoViewCoordsInPageColumn;
 
 export var addVisitedPosts: (currentPostId: number, nextPostId: number) => void = _.noop;
@@ -75,15 +73,53 @@ function openScrollButtonsDialog(openButton) {
 }
 
 
-export var ScrollButtons = debiki2.utils.createClassAndFactory({
+export var ScrollButtons = createClassAndFactory({
   getInitialState: function() {
     return {
       visitedPosts: [],
       currentVisitedPostIndex: -1,
+      isShown: false,
     };
   },
 
-  // Crazy with number | string. Oh well, fix later [3KGU02]
+  componentDidMount: function() {
+    // Similar code here: [5KFEWR7]
+    // COULD_OPTIMIZE? Perhaps sync all those time callbacks, so done in same reflow?
+    setTimeout(this.showOrHide, 250);
+
+    addVisitedPosts = this.addVisitedPosts;
+    addVisitedPositionAndPost = this.addVisitedPositionAndPost;
+    addVisitedPosition = this.addVisitedPosition;
+    keymaster('b', this.goBack);
+    keymaster('f', this.goForward);
+    keymaster('1', scrollToTop);
+    keymaster('2', scrollToReplies);
+    keymaster('3', scrollToBottom);
+  },
+
+  componentWillUnmount: function() {
+    this.isGone = true;
+    addVisitedPosts = _.noop;
+    addVisitedPositionAndPost = _.noop;
+    addVisitedPosition = _.noop;
+    keymaster.unbind('b', 'all');
+    keymaster.unbind('f', 'all');
+    keymaster.unbind('1', 'all');
+    keymaster.unbind('2', 'all');
+    keymaster.unbind('3', 'all');
+  },
+
+  showOrHide: function() {
+    if (this.isGone) return;
+    let pageColumn = document.getElementById('esPageScrollable');
+    let pageHasScrollbars = pageColumn.scrollHeight > window.innerHeight;
+    if (this.state.isShown !== pageHasScrollbars) {
+      this.setState({ isShown: pageHasScrollbars });
+    }
+    setTimeout(this.showOrHide, 500);
+  },
+
+  // Crazy with number | string. Oh well, fix later [3KGU02] CLEAN_UP
   addVisitedPosts: function(currentPostId: number, nextPostId: number | string) {
     var visitedPosts = this.state.visitedPosts; // TODO clone, don't modify visitedPosts directly below [immutablejs]
     visitedPosts.splice(this.state.currentVisitedPostIndex + 1, 999999);
@@ -172,28 +208,6 @@ export var ScrollButtons = debiki2.utils.createClassAndFactory({
         this.state.currentVisitedPostIndex < this.state.visitedPosts.length - 1;
   },
 
-  componentDidMount: function() {
-    addVisitedPosts = this.addVisitedPosts;
-    addVisitedPositionAndPost = this.addVisitedPositionAndPost;
-    addVisitedPosition = this.addVisitedPosition;
-    keymaster('b', this.goBack);
-    keymaster('f', this.goForward);
-    keymaster('1', scrollToTop);
-    keymaster('2', scrollToReplies);
-    keymaster('3', scrollToBottom);
-  },
-
-  componentWillUnmount: function() {
-    addVisitedPosts = _.noop;
-    addVisitedPositionAndPost = _.noop;
-    addVisitedPosition = _.noop;
-    keymaster.unbind('b', 'all');
-    keymaster.unbind('f', 'all');
-    keymaster.unbind('1', 'all');
-    keymaster.unbind('2', 'all');
-    keymaster.unbind('3', 'all');
-  },
-
   openScrollButtonsDialog: function(event) {
     openScrollButtonsDialog(event.target);
   },
@@ -259,6 +273,9 @@ export var ScrollButtons = debiki2.utils.createClassAndFactory({
   },
 
   render: function() {
+    if (!this.state.isShown)
+      return null;
+
     var openScrollMenuButton = Button({ className: 'esScrollBtns_menu', ref: 'scrollMenuButton',
         onClick: this.openScrollButtonsDialog }, "Scroll");
 
@@ -346,19 +363,19 @@ var ScrollButtonsDropdownModal = createComponent({
       var endHelp = "Go to the bottom of the page. Shortcut: 3";
 
       var scrollToTopButton = isChat ? null :
-        Button({ className: 'esScrollDlg_Up', onClick: this.scrollToTop, title: topHelp,
-            disabled: !state.enableGotoTopBtn, bsStyle: 'primary' },
+        PrimaryButton({ className: 'esScrollDlg_Up', onClick: this.scrollToTop, title: topHelp,
+            disabled: !state.enableGotoTopBtn },
           r.span({},
             r.span({ className: 'esScrollDlg_Up_Arw' }, '➜'), "Page top"));
 
       var scrollToRepliesButton = isChat || neverHasReplies ? null :
-        Button({ className: 'esScrollDlg_Replies', onClick: this.scrollToReplies,
-            title: repliesHelp, disabled: !state.enableGotoRepliesBtn, bsStyle: 'primary' },
+        PrimaryButton({ className: 'esScrollDlg_Replies', onClick: this.scrollToReplies,
+            title: repliesHelp, disabled: !state.enableGotoRepliesBtn },
           r.span({ className: 'icon-comment' }, "Replies"));
 
-      var scrollToEndButton = Button({ className: 'esScrollDlg_Down',
+      var scrollToEndButton = PrimaryButton({ className: 'esScrollDlg_Down',
           onClick: this.scrollToEnd, title: endHelp,
-          disabled: !state.enableGotoEndBtn, bsStyle: 'primary' },
+          disabled: !state.enableGotoEndBtn },
         r.span({},
           r.span({ className: 'esScrollDlg_Down_Arw' }, '➜'), isChat ? "Page bottom" : "Bottom"));
 

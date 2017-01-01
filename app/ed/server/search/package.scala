@@ -22,7 +22,7 @@ import com.debiki.core.Prelude._
 import debiki.dao.PageStuff
 import org.elasticsearch.search.highlight.HighlightField
 import org.{elasticsearch => es}
-import debiki.ReactJson.JsStringOrNull
+import debiki.ReactJson._
 import play.api.libs.json._
 import scala.collection.immutable
 
@@ -134,7 +134,8 @@ package object search {
   }
 
 
-  def makeElasticSearchJsonDocFor(post: Post, siteId: SiteId): JsObject = {
+  def makeElasticSearchJsonDocFor(siteId: SiteId, post: Post, categoryId: Option[CategoryId],
+        tags: Set[TagLabel]): JsObject = {
     val Fields = PostDocFields
     val approvedPlainText = post.approvedHtmlSanitized.map(org.jsoup.Jsoup.parse(_).text())
     val json = Json.obj(
@@ -151,6 +152,8 @@ package object search {
       Fields.CurrentRevisionNr -> post.currentRevisionNr,
       Fields.UnapprovedSource -> (
         if (post.isCurrentVersionApproved) JsNull else JsString(post.currentSource)),
+      Fields.Tags -> JsArray(tags.toSeq.map(JsString)),
+      Fields.CategoryId -> JsNumberOrNull(categoryId),
       Fields.CreatedAtUnixSeconds -> post.createdAtUnixSeconds)
 
     json
@@ -166,6 +169,7 @@ package object search {
         case null =>
           // Why no highlights? Oh well, just return the plain text then.
           val textUnsafe = (json \ Fields.ApprovedPlainText).as[String]
+          SECURITY; TESTS_MISSING
           Vector(org.owasp.encoder.Encode.forHtmlContent(textUnsafe))
         case highlightField: HighlightField =>
           // Html already escaped. [7YK24W]
@@ -198,6 +202,9 @@ package object search {
     // Later: index plain text instead of markdown source.
     val UnapprovedSource = "unapprovedSource"
     val CreatedAtUnixSeconds = "createdAt"
+    val Tags = "tags"
+    val PageTags = "pageTags"  // later
+    val CategoryId = "categoryId"
   }
 
 
@@ -215,6 +222,7 @@ package object search {
 
     val typeString = """"type": "string""""
     val typeInteger = """"type": "integer""""
+    val typeKeyword = """"type": "keyword""""
     val typeDate = """"type": "date""""
     val notIndexed = """"index": "no""""
     val notAnalyzed = """"index": "not_analyzed""""
@@ -224,8 +232,10 @@ package object search {
 
     import PostDocFields._
 
-    // (Don't analyze anything with the standard analyzer. It is good for most European
-    // language documents.)
+    // - Don't analyze anything with the standard analyzer. It is good for most European
+    //   language documents.
+    // - A type: keyword field doesn't have any 'analyzer' property (instead, exact matches only).
+    //
     def postMappingString: String = i"""{
       |"$PostDocType": {
       |  "_all": { "enabled": false  },
@@ -238,6 +248,8 @@ package object search {
       |    "$ApprovedPlainText":     { $typeString,  $analyzerLanguage },
       |    "$CurrentRevisionNr":     { $typeInteger, $notIndexed },
       |    "$UnapprovedSource":      { $typeString,  $analyzerLanguage },
+      |    "$Tags":                  { $typeKeyword },
+      |    "$CategoryId":            { $typeInteger, $notAnalyzed },
       |    "$CreatedAtUnixSeconds":  { $typeDate,    $formatEpochSeconds }
       |  }
       |}}

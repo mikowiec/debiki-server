@@ -76,6 +76,7 @@ enum PricePlan {  // [4GKU024S]
 }
 
 enum LoginReason {
+  SignUp = 13,
   LoginToChat = 10,
   LoginToLike = 11,
   BecomeAdmin = 12,
@@ -88,7 +89,7 @@ enum PinPageWhere {
 }
 
 
-enum PageRole {
+enum PageRole { // dupl in client/e2e/test-types.ts [5F8KW0P2]
   CustomHtmlPage = 1,
   WebPage = 2,  // rename to Info?
   Code = 3,
@@ -109,6 +110,7 @@ enum PageRole {
   // DirectMessage = 20,
   Form = 20,  // try to remove?
   Critique = 16, // [plugin]
+  UsabilityTesting = 21, // [plugin]
 }
 
 
@@ -118,6 +120,16 @@ enum PostType {
   StaffWiki = 11,
   CommunityWiki = 12,
   CompletedForm = 21,
+}
+
+
+// Could change to PageLayout bitmask. For now though:
+enum TopicListLayout {
+  TitleOnly = 1,
+  TitleExcerptSameLine = 2,
+  ExcerptBelowTitle = 3,
+  ThumbnailLeft = 4,
+  ThumbnailsBelowTitle = 5,
 }
 
 
@@ -192,6 +204,7 @@ var ReviewReasons = {
   lateEdit: (reviewTask: ReviewTask) => reviewTask.reasonsLong & (1 << 7),
   postFlagged: (reviewTask: ReviewTask) => reviewTask.reasonsLong & (1 << 8),
   postUnpopular: (reviewTask: ReviewTask) => reviewTask.reasonsLong & (1 << 9),
+  postIsSpam: (reviewTask: ReviewTask) => reviewTask.reasonsLong & (1 << 10),
   userCreated: (reviewTask: ReviewTask) => reviewTask.reasonsLong & (1 << 20),
   userNewAvatar: (reviewTask: ReviewTask) => reviewTask.reasonsLong & (1 << 21),
   userNameEdited: (reviewTask: ReviewTask) => reviewTask.reasonsLong & (1 << 22),
@@ -216,8 +229,16 @@ var RoutePathCategories = 'categories';
 var ImpersonationCookieName = 'esCoImp';
 
 
-// Enable some hard-to-use features for me only right now.
-declare var debiki: any;
-var IsEffectiveDiscussionsDotOrg = (typeof debiki !== 'undefined') && debiki.siteId === '3';
+// Some CSS and layout related constants. [6PFDS3]
+var UseWideForumLayoutMinWidth = 1000;
+var UseWidePageLayoutMinWidth = 750;
+var WatchbarWidth = 230;  // dupl in css [7GYK42]
+var ContextbarMinWidth = 270;  // dupl in css [4FK0ZD]
+
+// No idea what we're rendering for, but mobile phones are common, and slow, so
+// let's help them by trying to give them the correct layout directly.
+// Assume a horizontally tilted phone.
+var ServerSideWindowWidth = 700;
+
 
 // vim: fdm=marker et ts=2 sw=2 tw=0 fo=r list

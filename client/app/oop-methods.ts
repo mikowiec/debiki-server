@@ -88,6 +88,19 @@ export function notfLevel_title(notfLevel: NotfLevel): string {
 }
 
 
+export function post_shallRenderAsHidden(post: Post): boolean {
+  return post.isBodyHidden && _.isEmpty(post.sanitizedHtml);
+}
+
+
+// Store
+//----------------------------------
+
+export function store_isPageDeleted(store: Store): boolean {
+  return !!store.pageDeletedAtMs || _.some(store.ancestorsRootFirst, a => a.isDeleted);
+}
+
+
 //------------------------------------------------------------------------------
    }
 //------------------------------------------------------------------------------

@@ -99,7 +99,7 @@ object InviteController extends mvc.Controller {
       request.dao.saveUnsentEmail(welcomeEmail) // COULD (should?) mark as sent, how?
       debiki.Globals.sendEmail(welcomeEmail, request.siteId)
 
-      val inviter = request.dao.loadUser(invite.createdById) getOrDie "DwE4KDEP0"
+      val inviter = request.dao.getUser(invite.createdById) getOrDie "DwE4KDEP0"
       val inviteAcceptedEmail = makeYourInviteWasAcceptedEmail(request.host, newUser, inviter)
       debiki.Globals.sendEmail(inviteAcceptedEmail, request.siteId)
       // COULD create a notification instead / too.
@@ -149,7 +149,7 @@ object InviteController extends mvc.Controller {
   }
 
 
-  private def makeWelcomeSetPasswordEmail(newUser: CompleteUser, siteHostname: String) = {
+  private def makeWelcomeSetPasswordEmail(newUser: MemberInclDetails, siteHostname: String) = {
     Email(
       EmailType.InvitePassword,
       sendTo = newUser.emailAddress,
@@ -160,7 +160,7 @@ object InviteController extends mvc.Controller {
   }
 
 
-  def makeYourInviteWasAcceptedEmail(siteHostname: String, newUser: CompleteUser, inviter: User) = {
+  def makeYourInviteWasAcceptedEmail(siteHostname: String, newUser: MemberInclDetails, inviter: User) = {
     Email(
       EmailType.InviteAccepted,
       sendTo = inviter.email,

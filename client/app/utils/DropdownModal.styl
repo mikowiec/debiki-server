@@ -7,7 +7,18 @@
 
 .esDropModal-NotTooWide
   .esDropModal_content
-    max-width: 75%; // so always some emptiness outside that one can click to close. [4YK8ST2]
+    max-width: 89%; // so always some emptiness outside that one can click to close. [4YK8ST2]
+                    // ... no, now I've added a close X button instead. And made the dialog
+                    // wider (89% not just 75%).
+
+.esDropModal_CloseB
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 1;
+  &.esCloseCross
+    // Make it easier to click = larger. Other stuff to click tend to be far away anyway.
+    padding: 10px 14px 35px 30px;
 
 .esDropModal_content
   position: fixed;
@@ -26,6 +37,7 @@
 
 // If a Bootstrap dropdown converted to DropModal and placed inside:
 .esDropModal_content > .dropdown-menu
+  max-width: 500px;
   display: block; // else none, until some open class added too
   position: static; // otherwise absolute
   z-index: 0;
@@ -38,4 +50,6 @@
   border-radius: 0;
   li
     margin: 0;
+    a
+      max-width: 100%;
 

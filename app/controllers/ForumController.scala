@@ -17,7 +17,7 @@
 
 package controllers
 
-import debiki.dao.{CategoriesDao, CategoryToSave, PageStuff}
+import debiki.dao.{CategoriesDao, CategoryToSave, PageStuff, SiteDao}
 import collection.mutable
 import com.debiki.core._
 import com.debiki.core.Prelude._
@@ -114,6 +114,25 @@ object ForumController extends mvc.Controller {
   }
 
 
+  def deleteCategory = AdminPostJsonAction(maxLength = 200) { request =>
+    deleteUndeleteCategory(request, delete = true)
+  }
+
+
+  def undeleteCategory = AdminPostJsonAction(maxLength = 200) { request =>
+    deleteUndeleteCategory(request, delete = false)
+  }
+
+
+  private def deleteUndeleteCategory(request: JsonPostRequest, delete: Boolean): Result = {
+    val categoryId = (request.body \ "categoryId").as[CategoryId]
+    request.dao.deleteUndeleteCategory(categoryId, delete = delete, request.who)
+    val patch = ReactJson.makeCategoriesStorePatch(
+      isStaff = true, restrictedOnly = false, request.dao)
+    OkSafeJson(patch)
+  }
+
+
   /** Later, I'll add about user pages? About tag? So category-id is optional, might
     * be user-id or tag-id instead.
     */
@@ -130,20 +149,41 @@ object ForumController extends mvc.Controller {
   }
 
 
-  def listTopics(categoryId: String) = GetAction { request =>
-    val categoryIdInt: CategoryId = Try(categoryId.toInt) getOrElse throwBadReq(
-      "DwE4KG08", "Bat category id")
+  def listTopics(categoryId: Int) = GetAction { request =>
     val pageQuery: PageQuery = parseThePageQuery(request)
-    val topics = listTopicsInclPinned(categoryIdInt, pageQuery, request.dao,
+    throwForbiddenIf(pageQuery.pageFilter.includesDeleted && !request.isStaff, "EdE5FKZX2",
+      "Only staff can list deleted pages")
+    val topics = listTopicsInclPinned(categoryId, pageQuery, request.dao,
       includeDescendantCategories = true, isStaff = request.isStaff, restrictedOnly = false)
-    val pageStuffById = request.dao.loadPageStuff(topics.map(_.pageId))
+    makeTopicsReply(topics, request.dao)
+  }
+
+
+  def listTopicsByUser(userId: UserId) = GetAction { request =>
+    val caller = request.user
+    val isStaffOrSelf = caller.exists(_.isStaff) || caller.exists(_.id == userId)
+    val topicsInclForbidden = request.dao.listPagesByUser(
+      userId, isStaffOrSelf = isStaffOrSelf, limit = 200)
+    val topics = topicsInclForbidden filter { page: PagePathAndMeta =>
+      request.dao.maySeePageUseCache(page.meta, caller)._1
+    }
+    makeTopicsReply(topics, request.dao)
+  }
+
+
+  def makeTopicsReply(topics: Seq[PagePathAndMeta], dao: SiteDao): Result = {
+    val pageStuffById = dao.getPageStuffById(topics.map(_.pageId))
+    val users = dao.getUsersAsSeq(pageStuffById.values.flatMap(_.userIds))
     val topicsJson: Seq[JsObject] = topics.map(topicToJson(_, pageStuffById))
-    val json = Json.obj("topics" -> topicsJson)
+    val json = Json.obj(
+      "topics" -> topicsJson,
+      "users" -> users.map(JsUser))
     OkSafeJson(json)
   }
 
 
   def listCategories(forumId: PageId) = GetAction { request =>
+    unused("EsE4KFC02")
     val (categories, defaultCategoryId) = request.dao.listSectionCategories(forumId,
       isStaff = request.isStaff, restrictedOnly = false)
     val json = JsArray(categories.map({ category =>
@@ -173,7 +213,7 @@ object ForumController extends mvc.Controller {
     }
 
     val pageStuffById: Map[PageId, debiki.dao.PageStuff] =
-      request.dao.loadPageStuff(pageIds)
+      request.dao.getPageStuffById(pageIds)
 
     val json = JsArray(categories.map({ category =>
       categoryToJson(category, category.id == defaultCategoryId,
@@ -188,9 +228,15 @@ object ForumController extends mvc.Controller {
         includeDescendantCategories: Boolean, isStaff: Boolean, restrictedOnly: Boolean,
         limit: Int = NumTopicsToList)
         : Seq[PagePathAndMeta] = {
-    val topics: Seq[PagePathAndMeta] = dao.listPagesInCategory(
+    var topics: Seq[PagePathAndMeta] = dao.listPagesInCategory(
       categoryId, includeDescendantCategories, isStaff = isStaff, restrictedOnly = restrictedOnly,
       pageQuery, limit)
+
+    // For now. COULD do the filtering in the db query instead, so won't find 0 pages just because
+    // all most-recent-pages are hidden.
+    if (!isStaff) {
+      topics = topics.filter(!_.meta.isHidden)
+    }
 
     // If sorting by bump time, sort pinned topics first. Otherwise, don't.
     val topicsInclPinned = pageQuery.orderOffset match {
@@ -275,11 +321,13 @@ object ForumController extends mvc.Controller {
       "pageRole" -> topic.pageRole.toInt,
       "title" -> topicStuff.title,
       "url" -> topic.path.value,
-      "categoryId" -> topic.categoryId.getOrDie(
-        "DwE49Fk3", s"Topic `${topic.id}', site `${topic.path.siteId}', belongs to no category"),
+      // Private chats & formal messages might not belong to any category.
+      "categoryId" -> JsNumberOrNull(topic.categoryId),
       "pinOrder" -> JsNumberOrNull(topic.meta.pinOrder),
       "pinWhere" -> JsNumberOrNull(topic.meta.pinWhere.map(_.toInt)),
-      "excerpt" -> JsStringOrNull(topicStuff.bodyExcerptIfPinned),
+      "excerpt" -> JsStringOrNull(topicStuff.bodyExcerpt),
+      "firstImageUrls" -> JsArray(topicStuff.bodyImageUrls.map(JsString)),
+      "popularRepliesImageUrls" -> JsArray(topicStuff.popularRepliesImageUrls.map(JsString)),
       "numPosts" -> JsNumber(topic.meta.numRepliesVisible + 1),
       "numLikes" -> topic.meta.numLikes,
       "numWrongs" -> topic.meta.numWrongs,
@@ -287,19 +335,12 @@ object ForumController extends mvc.Controller {
       "numUnwanteds" -> topic.meta.numUnwanteds,
       "numOrigPostLikes" -> topic.meta.numOrigPostLikeVotes,
       "numOrigPostReplies" -> topic.meta.numOrigPostRepliesVisible,
-      "author" -> JsUserOrNull(topicStuff.author),
       "authorId" -> JsNumber(topic.meta.authorId),
-      "authorUsername" -> JsStringOrNull(topicStuff.authorUsername),
-      "authorFullName" -> JsStringOrNull(topicStuff.authorFullName),
-      "authorAvatarUrl" -> JsStringOrNull(topicStuff.authorAvatarUrl),
-      "createdEpoch" -> date(topic.meta.createdAt), // try to remove
       "createdAtMs" -> JsDateMs(topic.meta.createdAt),
-      "bumpedEpoch" -> dateOrNull(topic.meta.bumpedAt), // try to remove
       "bumpedAtMs" -> JsDateMsOrNull(topic.meta.bumpedAt),
-      "lastReplyEpoch" -> dateOrNull(topic.meta.lastReplyAt), // try to remove
       "lastReplyAtMs" -> JsDateMsOrNull(topic.meta.lastReplyAt),
-      "lastReplyer" -> JsUserOrNull(topicStuff.lastReplyer),
-      "frequentPosters" -> JsArray(topicStuff.frequentPosters.map(JsUser)),
+      "lastReplyerId" -> JsNumberOrNull(topicStuff.lastReplyerId),
+      "frequentPosterIds" -> JsArray(topicStuff.frequentPosterIds.map(JsNumber(_))),
       "answeredAtMs" -> dateOrNull(topic.meta.answeredAt),
       "answerPostUniqueId" -> JsNumberOrNull(topic.meta.answerPostUniqueId),
       "plannedAtMs" -> dateOrNull(topic.meta.plannedAt),
@@ -307,6 +348,7 @@ object ForumController extends mvc.Controller {
       "closedAtMs" -> dateOrNull(topic.meta.closedAt),
       "lockedAtMs" -> dateOrNull(topic.meta.lockedAt),
       "frozenAtMs" -> dateOrNull(topic.meta.frozenAt),
+      "hiddenAtMs" -> JsWhenMsOrNull(topic.meta.hiddenAt),
       "deletedAtMs" -> JsDateMsOrNull(topic.meta.deletedAt))
   }
 

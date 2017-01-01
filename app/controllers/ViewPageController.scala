@@ -21,10 +21,9 @@ import com.debiki.core._
 import com.debiki.core.Prelude._
 import debiki.RateLimits.NoRateLimits
 import debiki._
-import debiki.ReactJson.JsUser
 import io.efdi.server.http._
 import java.{util => ju}
-import debiki.dao.SiteDao
+import debiki.dao.{PageStuff, SiteDao}
 import play.api._
 import play.api.Play.current
 import play.api.mvc.{Action => _, _}
@@ -49,13 +48,90 @@ object ViewPageController extends mvc.Controller {
     "\"__html_encoded_volatile_json__\""
 
 
+  def listPosts(authorId: UserId) = GetAction { request: GetRequest =>
+    import request.{dao, user => caller}
+
+    val callerIsStaff = caller.exists(_.isStaff)
+    val callerIsStaffOrAuthor = callerIsStaff || caller.exists(_.id == authorId)
+    val author = dao.getUser(authorId) getOrElse throwNotFound("EdE2FWKA9", "Author not found")
+
+    val postsInclForbidden = dao.readOnlyTransaction { transaction =>
+      transaction.loadPostsByAuthorSkipTitles(authorId, limit = 999, OrderBy.MostRecentFirst)
+    }
+    val pageIdsInclForbidden = postsInclForbidden.map(_.pageId).toSet
+    val pageMetaById = dao.getPageMetasAsMap(pageIdsInclForbidden)
+
+    val posts = for {
+      post <- postsInclForbidden
+      pageMeta <- pageMetaById.get(post.pageId)
+      if dao.maySeePostUseCache(post, pageMeta, caller)._1
+    } yield post
+
+    val pageIds = posts.map(_.pageId).distinct
+    val pageStuffById = dao.getPageStuffById(pageIds)
+    val tagsByPostId = dao.readOnlyTransaction(_.loadTagsByPostId(posts.map(_.uniqueId)))
+
+    val postsJson = posts flatMap { post =>
+      val pageMeta = pageMetaById.get(post.pageId) getOrDie "EdE2KW07E"
+      val tags = tagsByPostId.getOrElse(post.uniqueId, Set.empty)
+      var postJson = ReactJson.postToJsonOutsidePage(post, pageMeta.pageRole,
+        showHidden = true, includeUnapproved = callerIsStaffOrAuthor, tags)
+
+      pageStuffById.get(post.pageId) map { pageStuff =>
+        postJson += "pageId" -> JsString(post.pageId)
+        postJson += "pageTitle" -> JsString(pageStuff.title)
+        postJson += "pageRole" -> JsNumber(pageStuff.pageRole.toInt)
+        if (callerIsStaff && (post.numPendingFlags > 0 || post.numHandledFlags > 0)) {
+          postJson += "numPendingFlags" -> JsNumber(post.numPendingFlags)
+          postJson += "numHandledFlags" -> JsNumber(post.numHandledFlags)
+        }
+        postJson
+      }
+    }
+
+    OkSafeJson(Json.obj(
+      "author" -> ReactJson.JsUser(author),
+      "posts" -> JsArray(postsJson)))
+  }
+
+
+  def loadPost(pageId: PageId, postNr: PostNr) = GetActionAllowAnyone { request =>
+    // Similar to viewPageImpl, keep in sync. [7PKW0YZ2]
+
+    val dao = request.dao
+    val siteSettings = dao.loadWholeSiteSettings()
+    val authenticationRequired = siteSettings.userMustBeAuthenticated ||
+      siteSettings.userMustBeApproved
+
+    if (authenticationRequired) {
+      if (!request.theUser.isAuthenticated)
+        throwForbidden("EdE7KFW02", "Not authenticated")
+
+      if (siteSettings.userMustBeApproved && !request.theUser.isApprovedOrStaff)
+        throwForbidden("EdE4F8WV0", "Account not approved")
+    }
+
+    val (maySee, debugCode) = dao.maySeePostUseCache(pageId, postNr, request.user)
+    if (!maySee) {
+      // Don't indicate that the page exists, because the page slug might tell strangers
+      // what it is about. [7C2KF24]
+      throwIndistinguishableNotFound(debugCode)
+    }
+
+    val json = ReactJson.makeStorePatchForPostNr(pageId, postNr, dao, showHidden = true) getOrElse {
+      throwNotFound("EdE6PK4SI2", s"Post ${PagePostNr(pageId, postNr)} not found")
+    }
+    OkSafeJson(json)
+  }
+
+
   def viewPage(path: String) = AsyncGetActionAllowAnyone { request =>
     viewPageImpl(request)
   }
 
 
   def markPageAsSeen(pageId: PageId) = PostJsonAction(NoRateLimits, maxLength = 2) { request =>
-    val watchbar = request.dao.loadWatchbar(request.theUserId)
+    val watchbar = request.dao.getOrCreateWatchbar(request.theUserId)
     val newWatchbar = watchbar.markPageAsSeen(pageId)
     request.dao.saveWatchbar(request.theUserId, newWatchbar)
     Ok
@@ -63,6 +139,8 @@ object ViewPageController extends mvc.Controller {
 
 
   private def viewPageImpl(request: GetRequest): Future[Result] = {
+    // Similar to loadPost, keep in sync. [7PKW0YZ2]
+
     dieIfAssetsMissingIfDevTest()
     Globals.throwForbiddenIfSecretNotChanged()
 
@@ -73,28 +151,32 @@ object ViewPageController extends mvc.Controller {
     }
 
     val dao = request.dao
+    val user = request.user
     val siteSettings = dao.loadWholeSiteSettings()
     val authenticationRequired = siteSettings.userMustBeAuthenticated ||
       siteSettings.userMustBeApproved
 
-    if (authenticationRequired && !request.isAuthenticated) {
-      return Future.successful(Ok(views.html.login.loginPopup(
-        mode = "LoginToAuthenticate",
-        serverAddress = s"//${request.host}",
-        returnToUrl = request.uri)) as HTML)
-    }
-
-    if (siteSettings.userMustBeApproved && !request.isApprovedOrStaff) {
-      val message = request.theUser.isApproved match {
-        case None =>
-          o"""Your account has not yet been approved. Please wait until
-            someone in our staff has approved it."""
-        case Some(false) =>
-          "You may not access this site, sorry. There is no point in trying again."
-        case Some(true) =>
-          die("DwE7KEWK2", "Both not approved and approved")
+    if (authenticationRequired) {
+      if (!user.exists(_.isAuthenticated)) {
+        return Future.successful(Ok(views.html.login.loginPopup(
+          SiteTpi(request),
+          mode = "LoginToAuthenticate",
+          serverAddress = s"//${request.host}",
+          returnToUrl = request.uri)) as HTML)
       }
-      throwForbidden("DwE403KGW0", message)
+
+      if (siteSettings.userMustBeApproved && !user.exists(_.isApprovedOrStaff)) {
+        val message = request.theUser.isApproved match {
+          case None =>
+            o"""Your account has not yet been approved. Please wait until
+              someone in our staff has approved it."""
+          case Some(false) =>
+            "You may not access this site, sorry. There is no point in trying again."
+          case Some(true) =>
+            die("DwE7KEWK2", "Both not approved and approved")
+        }
+        throwForbidden("DwE403KGW0", message)
+      }
     }
 
     val correctPagePath = dao.checkPagePath(specifiedPagePath) getOrElse {
@@ -108,13 +190,13 @@ object ViewPageController extends mvc.Controller {
           request, pageId = EmptyPageId, showId = false, pageRole = PageRole.WebPage))
     }
 
-    val pageMeta = correctPagePath.pageId.flatMap(dao.loadPageMeta) getOrElse {
+    val pageMeta = correctPagePath.pageId.flatMap(dao.getPageMeta) getOrElse {
       // Apparently the page was just deleted.
       // COULD load meta in the checkPagePath transaction (above), so that this cannot happen.
       throwIndistinguishableNotFound()
     }
 
-    val (maySee, debugCode) = maySeePage(pageMeta, request.user, dao)
+    val (maySee, debugCode) = dao.maySeePageUseCache(pageMeta, request.user)
     if (!maySee) {
       // Don't indicate that the page exists, because the page slug might tell strangers
       // what it is about. [7C2KF24]
@@ -145,52 +227,6 @@ object ViewPageController extends mvc.Controller {
       request = request.request)
 
     doRenderPage(pageRequest)
-  }
-
-
-  /** Returns true/false, + iff false, a why-forbidden debug reason code.
-    */
-  def maySeePage(pageMeta: PageMeta, user: Option[User], dao: SiteDao): (Boolean, String) = {
-    COULD; REFACTOR; // move this fn to PageDao?
-    if (user.exists(_.isAdmin))
-      return (true, "")
-
-    if (!user.exists(_.isStaff)) {
-      pageMeta.categoryId match {
-        case Some(categoryId) =>
-          val categories = dao.loadCategoriesRootLast(categoryId)
-          if (categories.exists(_.staffOnly))
-            return (false, "EsE8YGK25")
-        case None =>
-          // Fine, as of now, let everyone view pages not placed in any category, by default.
-      }
-
-      pageMeta.pageRole match {
-        case PageRole.SpecialContent | PageRole.Code =>
-          return (false, "EsE4YK02R")
-        case _ =>
-          // Fine.
-      }
-
-      val onlyForAuthor = pageMeta.isDeleted // later: or if !isPublished
-      if (onlyForAuthor && !user.exists(_.id == pageMeta.authorId))
-        return (false, "EsE5GK702")
-    }
-
-    if (pageMeta.pageRole.isPrivateGroupTalk) {
-      val theUser = user getOrElse {
-        return (false, "EsE4YK032-No-User")
-      }
-
-      if (!theUser.isAuthenticated)
-        return (false, "EsE2GYF04-Is-Guest")
-
-      val memberIds = dao.loadMessageMembers(pageMeta.pageId)
-      if (!memberIds.contains(theUser.id))
-        return (false, "EsE5K8W27-Not-Page-Member")
-    }
-
-    (true, "")
   }
 
 

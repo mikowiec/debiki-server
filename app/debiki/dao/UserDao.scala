@@ -21,12 +21,12 @@ import com.debiki.core._
 import debiki.DebikiHttp.throwForbidden
 import debiki.{BrowserId, SidStatus, DebikiSecurity}
 import io.efdi.server.http.throwForbiddenIf
-import io.efdi.server.{UserAndLevels, Who}
 import java.{util => ju}
 import play.api.libs.json.JsArray
 import scala.collection.immutable
 import Prelude._
 import EmailNotfPrefs.EmailNotfPrefs
+import scala.collection.mutable.ArrayBuffer
 
 
 trait UserDao {
@@ -42,7 +42,7 @@ trait UserDao {
 
   /** Returns: (CompleteUser, Invite, hasBeenAcceptedAlready: Boolean)
     */
-  def acceptInviteCreateUser(secretKey: String): (CompleteUser, Invite, Boolean) = {
+  def acceptInviteCreateUser(secretKey: String): (MemberInclDetails, Invite, Boolean) = {
     readWriteTransaction { transaction =>
       var invite = transaction.loadInvite(secretKey) getOrElse throwForbidden(
         "DwE6FKQ2", "Bad invite key")
@@ -101,12 +101,12 @@ trait UserDao {
   private def approveRejectUndoUser(userId: UserId, approverId: UserId,
         isapproved: Option[Boolean]) {
     readWriteTransaction { transaction =>
-      var user = transaction.loadTheCompleteUser(userId)
+      var user = transaction.loadTheMemberInclDetails(userId)
       user = user.copy(
         isApproved = isapproved,
         approvedAt = Some(transaction.currentTime),
         approvedById = Some(approverId))
-      transaction.updateCompleteUser(user)
+      transaction.updateMemberInclDetails(user)
     }
     removeUserFromMemCache(userId)
   }
@@ -119,7 +119,7 @@ trait UserDao {
       throwForbidden("DwE4KEF2", "Cannot change one's own is-admin and is-moderator state")
 
     readWriteTransaction { transaction =>
-      var user = transaction.loadTheCompleteUser(userId)
+      var user = transaction.loadTheMemberInclDetails(userId)
 
       if (user.isSuspendedAt(transaction.currentTime) && (
           isAdmin == Some(true) || isModerator == Some(true)))
@@ -129,7 +129,7 @@ trait UserDao {
         isAdmin = isAdmin.getOrElse(user.isAdmin),
         isModerator = isModerator.getOrElse(user.isModerator))
       // COULD update audit log.
-      transaction.updateCompleteUser(user)
+      transaction.updateMemberInclDetails(user)
     }
     removeUserFromMemCache(userId)
   }
@@ -137,18 +137,18 @@ trait UserDao {
 
   def lockMemberTrustLevel(memberId: UserId, newTrustLevel: Option[TrustLevel]) {
     readWriteTransaction { transaction =>
-      val member = transaction.loadTheCompleteUser(memberId)
+      val member = transaction.loadTheMemberInclDetails(memberId)
       val memberAfter = member.copy(lockedTrustLevel = newTrustLevel)
-      transaction.updateCompleteUser(memberAfter)
+      transaction.updateMemberInclDetails(memberAfter)
     }
   }
 
 
   def lockMemberThreatLevel(memberId: UserId, newThreatLevel: Option[ThreatLevel]) {
     readWriteTransaction { transaction =>
-      val member: CompleteUser = transaction.loadTheCompleteUser(memberId)
+      val member: MemberInclDetails = transaction.loadTheMemberInclDetails(memberId)
       val memberAfter = member.copy(lockedThreatLevel = newThreatLevel)
-      transaction.updateCompleteUser(memberAfter)
+      transaction.updateMemberInclDetails(memberAfter)
     }
   }
 
@@ -164,7 +164,7 @@ trait UserDao {
   def suspendUser(userId: UserId, numDays: Int, reason: String, suspendedById: UserId) {
     require(numDays >= 1, "DwE4PKF8")
     readWriteTransaction { transaction =>
-      var user = transaction.loadTheCompleteUser(userId)
+      var user = transaction.loadTheMemberInclDetails(userId)
       if (user.isAdmin)
         throwForbidden("DwE4KEF24", "Cannot suspend admins")
 
@@ -174,7 +174,7 @@ trait UserDao {
         suspendedTill = Some(suspendedTill),
         suspendedById = Some(suspendedById),
         suspendedReason = Some(reason.trim))
-      transaction.updateCompleteUser(user)
+      transaction.updateMemberInclDetails(user)
     }
     removeUserFromMemCache(userId)
   }
@@ -182,10 +182,10 @@ trait UserDao {
 
   def unsuspendUser(userId: UserId) {
     readWriteTransaction { transaction =>
-      var user = transaction.loadTheCompleteUser(userId)
+      var user = transaction.loadTheMemberInclDetails(userId)
       user = user.copy(suspendedAt = None, suspendedTill = None, suspendedById = None,
         suspendedReason = None)
-      transaction.updateCompleteUser(user)
+      transaction.updateMemberInclDetails(user)
     }
     removeUserFromMemCache(userId)
   }
@@ -197,7 +197,16 @@ trait UserDao {
         throwForbidden("DwE2WKF5", "Cannot block user: No audit log entry, so no ip and id cookie")
       }
 
-      if (!User.isGuestId(auditLogEntry.doerId))
+      blockGuestImpl(auditLogEntry.browserIdData, auditLogEntry.doerId,
+          numDays, threatLevel, blockerId)(transaction)
+    }
+  }
+
+
+  def blockGuestImpl(browserIdData: BrowserIdData, guestId: UserId, numDays: Int,
+        threatLevel: ThreatLevel, blockerId: UserId)(transaction: SiteTransaction) {
+
+      if (!User.isGuestId(guestId))
         throwForbidden("DwE4WKQ2", "Cannot block authenticated users. Suspend them instead")
 
       // Hardcode 2 & 6 weeks for now. Asking the user to choose # days –> too much for him/her
@@ -211,8 +220,9 @@ trait UserDao {
 
       val ipBlock = Block(
         threatLevel = threatLevel,
-        ip = Some(auditLogEntry.browserIdData.inetAddress),
-        browserIdCookie = Some(auditLogEntry.browserIdData.idCookie),
+        ip = Some(browserIdData.inetAddress),
+        // Hmm. Why cookie id too? The cookie is added below too (6PKU02Q), isn't that enough.
+        browserIdCookie = Some(browserIdData.idCookie),
         blockedById = blockerId,
         blockedAt = transaction.currentTime,
         blockedTill = ipBlockedTill)
@@ -220,7 +230,7 @@ trait UserDao {
       val browserIdCookieBlock = Block(
         threatLevel = threatLevel,
         ip = None,
-        browserIdCookie = Some(auditLogEntry.browserIdData.idCookie),
+        browserIdCookie = Some(browserIdData.idCookie),
         blockedById = blockerId,
         blockedAt = transaction.currentTime,
         blockedTill = cookieBlockedTill)
@@ -229,16 +239,15 @@ trait UserDao {
       // threat level is *worse* [6YF42]. Aand continue anyway with inserting browser id
       // cookie block.
       transaction.insertBlock(ipBlock)
-      transaction.insertBlock(browserIdCookieBlock)
+      transaction.insertBlock(browserIdCookieBlock) // (6PKU02Q)
 
       // Also set the user's threat level, if the new level is worse.
-      transaction.loadGuest(auditLogEntry.doerId) foreach { guest =>
+      transaction.loadGuest(guestId) foreach { guest =>
         if (!guest.lockedThreatLevel.exists(_.toInt > threatLevel.toInt)) {
           transaction.updateGuest(
             guest.copy(lockedThreatLevel = Some(threatLevel)))
         }
       }
-    }
   }
 
 
@@ -348,12 +357,12 @@ trait UserDao {
   def changePasswordCheckStrongEnough(userId: UserId, newPassword: String): Boolean = {
     val newPasswordSaltHash = DbDao.saltAndHashPassword(newPassword)
     readWriteTransaction { transaction =>
-      var user = transaction.loadTheCompleteUser(userId)
+      var user = transaction.loadTheMemberInclDetails(userId)
       DebikiSecurity.throwErrorIfPasswordTooWeak(
         password = newPassword, username = user.username,
         fullName = user.fullName, email = user.emailAddress)
       user = user.copy(passwordHash = Some(newPasswordSaltHash))
-      transaction.updateCompleteUser(user)
+      transaction.updateMemberInclDetails(user)
     }
   }
 
@@ -375,7 +384,7 @@ trait UserDao {
       if (!loginGrant.user.isSuspendedAt(loginAttempt.date))
         return loginGrant
 
-      val user = transaction.loadCompleteUser(loginGrant.user.id) getOrElse throwForbidden(
+      val user = transaction.loadMemberInclDetails(loginGrant.user.id) getOrElse throwForbidden(
         "DwE05KW2", "User not found, id: " + loginGrant.user.id)
       // Still suspended?
       if (user.suspendedAt.isDefined) {
@@ -406,16 +415,38 @@ trait UserDao {
   }
 
 
-  def loadCompleteUsers(onlyThosePendingApproval: Boolean): immutable.Seq[CompleteUser] = {
+  def loadSiteOwner(): Option[MemberInclDetails] = {
     readOnlyTransaction { transaction =>
-      transaction.loadCompleteUsers(onlyPendingApproval = onlyThosePendingApproval)
+      transaction.loadOwner()
     }
   }
 
 
-  def loadCompleteUser(userId: UserId): Option[CompleteUser] = {
+  def getUsersAsSeq(userIds: Iterable[UserId]): immutable.Seq[User] = {
+    val usersFound = ArrayBuffer[User]()
+    val missingIds = ArrayBuffer[UserId]()
+    userIds foreach { id =>
+      memCache.lookup[User](key(id)) match {
+        case Some(user) => usersFound.append(user)
+        case None => missingIds.append(id)
+      }
+    }
+    val moreUsers = readOnlyTransaction(_.loadUsers(missingIds))
+    usersFound.appendAll(moreUsers)
+    usersFound.toVector
+  }
+
+
+  def loadCompleteUsers(onlyThosePendingApproval: Boolean): immutable.Seq[MemberInclDetails] = {
     readOnlyTransaction { transaction =>
-      transaction.loadCompleteUser(userId)
+      transaction.loadMembersInclDetails(onlyPendingApproval = onlyThosePendingApproval)
+    }
+  }
+
+
+  def loadCompleteUser(userId: UserId): Option[MemberInclDetails] = {
+    readOnlyTransaction { transaction =>
+      transaction.loadMemberInclDetails(userId)
     }
   }
 
@@ -427,11 +458,11 @@ trait UserDao {
 
   def loadMember(userId: UserId): Option[Member] = {
     require(userId >= User.LowestMemberId, "EsE4GKX24")
-    loadUser(userId).map(_.asInstanceOf[Member])
+    getUser(userId).map(_.asInstanceOf[Member])
   }
 
 
-  def loadUser(userId: UserId): Option[User] = {
+  def getUser(userId: UserId): Option[User] = {
     memCache.lookup[User](
       key(userId),
       orCacheAndReturn = {
@@ -456,7 +487,7 @@ trait UserDao {
       case Some((identity, user)) => Some((Some(identity), user))
       case None =>
         // No OAuth or OpenID identity, try load password user:
-        loadUser(userId) match {
+        getUser(userId) match {
           case Some(user) =>
             Some((None, user))
           case None =>
@@ -475,19 +506,11 @@ trait UserDao {
   }
 
 
-  def loadUserInfoAndStats(userId: UserId): Option[UserInfoAndStats] =
-    readOnlyTransaction(_.loadUserInfoAndStats(userId))
-
-
-  def listUserActions(userId: UserId): Seq[UserActionInfo] =
-    readOnlyTransaction(_.listUserActions(userId))
-
-
   def loadNotifications(userId: UserId, upToWhen: Option[When], me: Who) = {
     readOnlyTransaction { transaction =>
       if (me.id != userId) {
         if (!transaction.loadUser(me.id).exists(_.isStaff))
-          throwForbidden("EsE5YKF20", "May not list other users' notifications")
+          throwForbidden("EsE5Y5IKF0", "May not list other users' notifications")
       }
       debiki.ReactJson.loadNotifications(userId, transaction, unseenFirst = false, limit = 100,
         upToWhen = None) // later: Some(upToWhenDate), and change to limit = 50 above?
@@ -497,9 +520,9 @@ trait UserDao {
 
   def verifyEmail(userId: UserId, verifiedAt: ju.Date) {
     readWriteTransaction { transaction =>
-      var user = transaction.loadTheCompleteUser(userId)
+      var user = transaction.loadTheMemberInclDetails(userId)
       user = user.copy(emailVerifiedAt = Some(verifiedAt))
-      transaction.updateCompleteUser(user)
+      transaction.updateMemberInclDetails(user)
     }
     removeUserFromMemCache(userId)
   }
@@ -511,7 +534,7 @@ trait UserDao {
     require(smallAvatar.isDefined == tinyAvatar.isDefined, "EsE9PYM2")
     require(smallAvatar.isDefined == mediumAvatar.isDefined, "EsE8YFM2")
     readWriteTransaction { transaction =>
-      val userBefore = transaction.loadTheCompleteUser(userId)
+      val userBefore = transaction.loadTheMemberInclDetails(userId)
       val userAfter = userBefore.copy(
         tinyAvatar = tinyAvatar,
         smallAvatar = smallAvatar,
@@ -530,7 +553,7 @@ trait UserDao {
             userAfter.smallAvatar.toSet ++ userAfter.mediumAvatar.toSet
       val refsInUseBefore = transaction.filterUploadRefsInUse(relevantRefs)
 
-      transaction.updateCompleteUser(userAfter)
+      transaction.updateMemberInclDetails(userAfter)
 
       if (hasNewAvatar) {
         val refsInUseAfter = transaction.filterUploadRefsInUse(relevantRefs)
@@ -563,7 +586,7 @@ trait UserDao {
         isOwner: Option[Boolean] = None) {
     // Don't specify emailVerifiedAt here — use verifyEmail() instead; it refreshes the cache.
     readWriteTransaction { transaction =>
-      var user = transaction.loadTheCompleteUser(userId)
+      var user = transaction.loadTheMemberInclDetails(userId)
       emailNotfPrefs foreach { prefs =>
         user = user.copy(emailNotfPrefs = prefs)
       }
@@ -573,7 +596,7 @@ trait UserDao {
       isOwner foreach { isOwner =>
         user = user.copy(isOwner = isOwner)
       }
-      transaction.updateCompleteUser(user)
+      transaction.updateMemberInclDetails(user)
     }
     removeUserFromMemCache(userId)
   }
@@ -618,10 +641,11 @@ trait UserDao {
   }
 
 
-  def saveRolePreferences(preferences: UserPreferences) = {
-    // BUG: the lost update bug.
+  def saveRolePreferences(preferences: MemberPreferences) = {
+    SECURITY // should create audit log entry. Should allow staff to change usernames.
+    BUG // the lost update bug.
     readWriteTransaction { transaction =>
-      val user = transaction.loadTheCompleteUser(preferences.userId)
+      val user = transaction.loadTheMemberInclDetails(preferences.userId)
 
       // Perhaps there's some security problem that would results in a non-staff user
       // getting an email about each and every new post. So, for now:
@@ -642,7 +666,7 @@ trait UserDao {
         throwForbidden("DwE44ELK9", "Must not modify one's email")
 
       val userAfter = user.copyWithNewPreferences(preferences)
-      transaction.updateCompleteUser(userAfter)
+      transaction.updateMemberInclDetails(userAfter)
 
       removeUserFromMemCache(preferences.userId)
       // Clear the page cache (by clearing all caches), if we changed the user's name.
@@ -713,7 +737,7 @@ trait UserDao {
   }
 
 
-  private def removeUserFromMemCache(userId: UserId) {
+  def removeUserFromMemCache(userId: UserId) {
     memCache.remove(key(userId))
   }
 

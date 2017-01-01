@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 Kaj Magnus Lindberg
+ * Copyright (C) 2016 Kaj Magnus Lindberg
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -23,20 +23,15 @@
 /// <reference path="../utils/window-zoom-resize-mixin.ts" />
 /// <reference path="../avatar/avatar.ts" />
 /// <reference path="../avatar/AvatarAndName.ts" />
-/// <reference path="../login/login.ts" />
-/// <reference path="../editor/editor.ts" />
 /// <reference path="discussion.ts" />
+/// <reference path="../more-bundle-not-yet-loaded.ts" />
+/// <reference path="../editor-bundle-not-yet-loaded.ts" />
 
 //------------------------------------------------------------------------------
    module debiki2.page {
 //------------------------------------------------------------------------------
 
-var d = { i: debiki.internal, u: debiki.v0.util };
 var r = React.DOM;
-var reactCreateFactory = React['createFactory'];
-var ReactBootstrap: any = window['ReactBootstrap'];
-var Button = reactCreateFactory(ReactBootstrap.Button);
-var MenuItem = reactCreateFactory(ReactBootstrap.MenuItem);
 
 var EditorBecomeFixedDist = 5;
 var DefaultEditorRows = 2;
@@ -54,14 +49,14 @@ export var ChatMessages = createComponent({
   },
 
   render: function() {
-    var store: Store = this.props;
+    var store: Store = this.props.store;
     var isChatMember = _.some(store.pageMemberIds, id => id === store.me.id);
     var editorOrJoinButton = isChatMember
-        ? ChatMessageEditor({ store: this.props, scrollDownToViewNewMessage: this.scrollDown })
+        ? ChatMessageEditor({ store: store, scrollDownToViewNewMessage: this.scrollDown })
         : JoinChatButton({});
     return (
       r.div({ className: 'esChatPage dw-page' },
-        TitleAndLastChatMessages({ store: this.props, ref: 'titleAndMessages' }),
+        TitleAndLastChatMessages({ store: store, ref: 'titleAndMessages' }),
         FixedAtBottom({ ref: 'fixedAtBottom' },
           editorOrJoinButton)));
   }
@@ -115,6 +110,10 @@ var TitleAndLastChatMessages = createComponent({
         // We show the title & body elsewhere.
         return;
       }
+      if (post.isPostDeleted) {
+        messages.push(DeletedChatMessage({ key: post.uniqueId, store: store, post: post }));
+        return;
+      }
       if (post.postId === FirstReplyNr) {
         // (COULD make this work also if post nr FirstReplyNr has been moved to another page
         // and hence will never be found. Fix by scrolling up, noticing that nothing was found,
@@ -129,7 +128,7 @@ var TitleAndLastChatMessages = createComponent({
         r.p({},
           "This is the " + ReactStore.getPageTitle() + " chat channel, created by ",
           avatar.AvatarAndName({ user: origPostAuthor, hideAvatar: true }),
-          ", ", timeExact(originalPost.createdAt));
+          ", ", timeExact(originalPost.createdAtMs));
 
     var perhapsHidden;
     if (!this.state.hasScrolledDown) {
@@ -168,6 +167,10 @@ var ChatMessage = createComponent({
     });
   },
 
+  delete_: function() {
+    morebundle.openDeletePostDialog(this.props.post);
+  },
+
   render: function () {
     var state = this.state;
     var store: Store = this.props.store;
@@ -179,7 +182,9 @@ var ChatMessage = createComponent({
     headerProps.isFlat = true;
     headerProps.exactTime = true;
     headerProps.stuffToAppend = (me.id !== author.id || state.isEditing) ? [] :
-      [r.button({ className: 'esC_M_EdB icon-edit', key: 'e', onClick: this.edit }, "edit")];
+      [r.button({ className: 'esC_M_EdB icon-edit', key: 'e', onClick: this.edit }, "edit"),
+        // (Don't show a trash icon, makes the page look too cluttered.)
+        r.button({className: 'esC_M_EdB', key: 'd', onClick: this.delete_ }, "delete")];
     //headerProps.stuffToAppend.push(
     //  r.button({ className: 'esC_M_MoreB icon-ellipsis', key: 'm' }, "more"));
     return (
@@ -189,6 +194,17 @@ var ChatMessage = createComponent({
         PostBody({ store: store, post: post })));
   }
 });
+
+
+
+function DeletedChatMessage(props) {
+  var post: Post = props.post;
+  return (
+    r.div({ className: 'esC_M', id: 'post-' + post.postId, key: props.key },
+      r.div({ className: 'dw-p-bd' },
+        r.div({ className: 'dw-p-bd-blk' },
+          "(Message deleted)"))));
+}
 
 
 
@@ -247,7 +263,7 @@ var JoinChatButton = createComponent({
   },
 
   joinChannel: function() {
-    login.loginIfNeededReturnToHash(LoginReason.LoginToChat, '#theJoinChatB', () => {
+    morebundle.loginIfNeededReturnToAnchor(LoginReason.LoginToChat, '#theJoinChatB', () => {
       if (this.isUnmounted) {
         // Now after having logged in, this join chat button got removed (unmounted) — that's
         // because we've joined the chat already (some time long ago). So, need do nothing, now.
@@ -260,8 +276,8 @@ var JoinChatButton = createComponent({
   render: function() {
     return (
       r.div({ className: 'esJoinChat' },
-        Button({ id: 'theJoinChatB', className: 'esJoinChat_btn',
-            onClick: this.joinChannel, bsStyle: 'primary' },
+        PrimaryButton({ id: 'theJoinChatB', className: 'esJoinChat_btn',
+            onClick: this.joinChannel },
           "Join this chat")));
   }
 });

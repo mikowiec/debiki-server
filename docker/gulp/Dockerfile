@@ -1,6 +1,6 @@
-FROM node:5
+FROM node:6.9.1
 
-RUN npm install -g bower gulp
+RUN npm install -g yarn gulp
 
 COPY entrypoint.sh /opt/docker-entrypoint.sh
 RUN  chmod ugo+x   /opt/docker-entrypoint.sh
@@ -8,5 +8,5 @@ ENTRYPOINT ["/opt/docker-entrypoint.sh"]
 
 WORKDIR /opt/debiki/server/
 
-CMD ["npm install --ignore-scripts && bower install && gulp watch"]
+CMD ["yarn install && gulp watch"]
 

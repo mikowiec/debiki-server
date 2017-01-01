@@ -27,7 +27,7 @@
  */
 
 //------------------------------------------------------------------------------
-   module debiki2 {
+   namespace debiki2 {
 //------------------------------------------------------------------------------
 
 var r = React.DOM;
@@ -69,44 +69,31 @@ export function page_canBeClosed(pageRole: PageRole) {
 }
 
 
-export function pageRole_toIconString(pageRole: PageRole) {
+export function pageRole_iconClass(pageRole: PageRole): string {
   switch (pageRole) {
-    case PageRole.CustomHtmlPage: return "Custom HTML page";
-    case PageRole.WebPage: return "Info page";
-    case PageRole.Code: return "Code";
-    case PageRole.SpecialContent: return "Special content";
-    case PageRole.EmbeddedComments: return "Embedded comments";
-    case PageRole.Blog: return "Blog";
-    case PageRole.Forum: return "Forum";
-    case PageRole.About: return "About";
-    case PageRole.Question: return PageRole_Question_IconString;
-    case PageRole.Problem: return PageRole_Problem_IconString;
-    case PageRole.Idea: return PageRole_Idea_IconString;
-    case PageRole.ToDo: return PageRole_Todo_IconString;
-    case PageRole.MindMap: return PageRole_MindMap_IconString;
-    case PageRole.Discussion: return PageRole_Discussion_IconString;
-    case PageRole.OpenChat: return PageRole_OpenChat_IconString;
-    case PageRole.PrivateChat: return PageRole_PrivateChat_IconString;
-    case PageRole.FormalMessage: return "Message";
-    case PageRole.Form: return PageRole_Form_IconString;
-    case PageRole.Critique: return "Critique";  // [plugin]
-    default: die('EsE4GUK75Z');
+    case PageRole.CustomHtmlPage: return '';
+    case PageRole.WebPage: return '';
+    case PageRole.Code: return '';
+    case PageRole.SpecialContent: return '';
+    case PageRole.EmbeddedComments: return '';
+    case PageRole.Blog: return '';
+    case PageRole.Forum: return '';
+    case PageRole.About: return '';
+    case PageRole.Question: return 'icon-help-circled';
+    case PageRole.Problem: return 'icon-attention-circled';
+    case PageRole.Idea: return 'icon-idea';
+    case PageRole.ToDo: return 'icon-check-empty';
+    case PageRole.MindMap: return 'icon-sitemap';
+    case PageRole.Discussion: return 'icon-comment-empty';
+    case PageRole.FormalMessage: return 'icon-mail';
+    case PageRole.OpenChat: return 'icon-chat';
+    case PageRole.PrivateChat: return 'icon-lock';
+    case PageRole.Form: return 'icon-th-list';
+    case PageRole.Critique: return '';  // [plugin]
+    case PageRole.UsabilityTesting: return '';  // [plugin]
+    default: die(`Bad page role: ${pageRole} [EdE2KW4A0]`);
   }
 }
-
-export var PageRole_Discussion_IconString =
-  r.span({ className: 'icon-comment-empty' }, "Discussion");
-export var PageRole_Question_IconString = r.span({ className: 'icon-help-circled' }, "Question");
-export var PageRole_Problem_IconString = r.span({ className: 'icon-attention-circled' }, "Problem");
-export var PageRole_Idea_IconString = r.span({ className: 'icon-idea' }, "Idea");
-export var PageRole_MindMap_IconString = r.span({ className: 'icon-sitemap' }, "Mind Map");
-
-export var PageRole_Todo_IconString = r.span({ className: 'icon-check-empty' }, "Todo");
-export var PageRole_OpenChat_IconString = r.span({ className: 'icon-chat' }, "Chat");
-export var PageRole_PrivateChat_IconString = r.span({ className: 'icon-lock' }, "Private Chat");
-
-export var PageRole_Form_IconString = r.span({ className: 'icon-th-list' }, "Form");
-
 
 //------------------------------------------------------------------------------
    }

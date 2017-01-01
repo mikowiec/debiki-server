@@ -20,26 +20,41 @@
   background-color: white
   position: relative;
 
-.DW.DW .dw-p-hd.dw-highlight-off,
 .dw-p-hd,
 .dw-p.dw-zd  // folded comment
-  padding: 0 0 0 3px;
-  font-size: 11px
-  color: hsl(0, 0%, 8%);
+  margin: 0;
+  padding: 0;
+  top: 0;
   line-height: 15px // or test w 120%
+
+.dw-p-hd,
+.dw-p.dw-zd,  // folded comment
+.DW.DW .dw-p-hd.dw-highlight-off
+  color: hsl(0, 0%, 8%);
   background-color: white
 
 .dw-p.dw-zd  // folded comment
   margin-bottom: 25px;
   cursor: pointer;
 
-.DW.DW .dw-p-bd.dw-highlight-off,
 .dw-p-bd,
 .dw-p-diff // COULD place -bd on -diff too, remove this -diff row?
-  padding: 12px 1px 0 3px // 3px aligns w .dw-p-hd (also padded left 3px)
+  padding: 1px 1px 0 0
   position: relative
-  background-color: white
   min-width: 5em
+  margin: 0 0 14px; // !important;
+  clear: both;
+  overflow-y: hidden;
+  overflow-x: auto;
+
+.dw-p-bd,
+.dw-p-diff,
+.DW.DW .dw-p-bd.dw-highlight-off
+  background-color: white
+
+.dw-depth-1 > .dw-p > .dw-p-bd
+  padding-left: 1px;  // looks more aligned with .dw-p-hd for some reason
+  padding-top: 8px;
 
 // Place debug-reading-progress outline above the .dw-p.
 .dw-p-hd
@@ -57,32 +72,35 @@
     z-index: 2;
     position: relative;
 
+.dw-p.dw-zd,
 .dw-x-show
   position: relative;
   bottom: 10px;
   padding: 0 0 3px 3px;  // padding-top hides parts of any <p> above
   margin: 7px 0 22px;
   font-style: italic;
-  letter-spacing: 0.22ex;
   background: #fff;
   color: hsl($uiHue, 20%, 50%);
 
-.dw-ts-squashed
-  .dw-x-show
-    bottom: 0;
-    padding: 10px 0 17px 5px;
-    display: block;
-    margin: -8px 0 8px;
-    z-index: 1;
-    float: left;
-    color: hsl(0, 0%, 53%);
-    &:hover
-      background-color: hsl($uiHue, 100%, 97%);
-      color: hsl($uiHue, 100%, 33%);
-      text-decoration: none;
+.dw-p.dw-zd,
+.dw-ts-squashed .dw-x-show
+  bottom: 0;
+  padding: 10px 0 17px 5px;
+  display: block;
+  margin: -8px 0 8px;
+  z-index: 1;
+  float: left;  // see [5FKT02W] below
+  color: hsl(0, 0%, 53%);
+  &:hover
+    background-color: hsl($uiHue, 100%, 97%);
+    color: hsl($uiHue, 100%, 33%);
+    text-decoration: none;
 
-  &.dw-2dcol > .dw-x-show
+.dw-ts-squashed.dw-2dcol > .dw-x-show
     color: hsl(0, 0%, 20%);
+
+.dw-single-and-multireplies
+  clear: both; // because of float: left above [5FKT02W]
 
 .dw-p.dw-x:hover
   .dw-p-hd,
@@ -165,7 +183,17 @@
   .dw-p-ttl > .dw-p-bd
     margin-left: 0
     padding-left: 0
+    // Wrap long titles.
+    overflow: hidden;
+    word-break: break-word;
 
+.dw-p-ttl > .dw-p-bd
+  margin-bottom: 0; // else too much margin-bottom, author name too far away
+
+// No idea why, but the descender spacing for the title, is missing, so e.g. a 'y' in
+// the title gets cut of (looks more like a v). Add some space. Weird.
+h1.dw-p-ttl
+  padding-bottom: 4px;
 
 .esPendingApproval
   font-size: 15px;
@@ -282,6 +310,9 @@ h1.dw-p-ttl
 .dw-p-unapproved > .dw-p-hd
   margin-bottom: 24px
 
+.dw-depth-1 .dw-p-unapproved > .dw-p-hd
+  padding: 14px 0 4px;
+
 .dw-p-dl > .dw-p-hd
   margin-bottom: 8px
 
@@ -294,11 +325,22 @@ h1.dw-p-ttl
   font-style: italic;
   color: hsl(0, 0%, 41%);
 
+.dw-rrs
+  padding-bottom: 5px;
+
 .DW .dw-rr // reply receiver
-  padding: 7px 0 6px 5px
+  padding: 7px 0 2px 5px
   display: inline-block;
   font-weight: bold;
   color: hsl(0, 0%, 28%);
+  &:hover
+    background: hsl($uiHue, 100%, 96%);
+    outline: hsl($uiHue, 100%, 87%) 2px solid;
+    text-decoration: none;
+
+.-RRs_RR_Aw
+  color: hsl(0, 0%, 52%); // or too dark
+  margin: 0 2px;
 
 // Make it easier to touch.
 html:not(.mouse) .dw-rr
@@ -331,7 +373,7 @@ html:not(.mouse) .dw-rr
     font-size: 24px;
     margin: 0 4px 0 1px;
 
-@media (min-width: $minShowAvatarWidth)
+.esPage-Compact
   .dw-id0 > .esWrong
     margin: 4px 0 11px 58px;
     left: 0;
@@ -506,12 +548,30 @@ html:not(.mouse) .dw-rr
 .dw-ar-t > .dw-p > .dw-p-bd > .dw-p-bd-blk > :first-child:not(h2)
   margin-top: 26px
 
-
 .dw-p-bd-blk
   margin: 0
   float: left
   clear: left
   width: 100%
+
+.s_P-Hdn .dw-p-bd-blk
+  padding: 5px 14px !important;
+  margin: 4px 0 33px; // whitespace needed because no post-actions shown below
+  background: hsl(0, 0%, 95.3%);
+  float: left;
+  display: block;
+  width: auto;
+  color: hsl(0, 0%, 26%);
+  cursor: pointer;
+  &.esOrigPost
+    margin-top: 15px;
+    padding: 7px 17px !important;
+  &:hover
+    color: hsl($uiHue, 100%, 20%);
+    background: hsl($uiHue, 70%, 96%);
+    outline: 1px solid hsl($uiHue, 100%, 91%);
+    text-decoration: none;
+
 
 // No margin-top for any title at the top in a comment.
 :not(.dw-ar-p-bd) > .dw-p-bd-blk:first-child
@@ -521,10 +581,37 @@ html:not(.mouse) .dw-rr
       margin-top: 0;
       padding-top: 0;
 
-.dw-p.dw-wiki
-  .dw-p-bd-blk:first-child
-    // There's no head so move the body up a bit.
-    margin-top: -6px
+
+// Narrow screens
+//===========================
+
+.esPage-Compact
+  .dw-depth-1
+    .dw-p
+      margin-left: 0 !important;
+      background: none;
+
+    > .dw-p > .dw-p-hd
+      margin-left: 44px;
+      top: 10px;
+
+    > .dw-p > .dw-p-bd
+      margin-top: 30px !important;
+      padding-top: 0;
+
+    > .esAvtr
+      width: 36px;
+      height: 36px;
+      img
+        width: 36px;
+        height: 36px;
+
+    > .esAvtr-ltr
+      font-size: 22px;
+      line-height: 36px;
+
+  .dw-single-and-multireplies
+    margin: 0 !important;
 
 
 // Solution/answer
@@ -623,7 +710,7 @@ html:not(.mouse) .dw-rr
   // so better hide here. COULD use another stylesheet if javascript disabled.
   display: none
 
-.dw-p-hd .dw-p-by-me,
+.dw-p-hd .dw-p-by-me
   font-weight: bold
   color: #151515
 
@@ -709,11 +796,10 @@ html.touch .dw-p-mark-click
 //===========================
 
 .DW .dw-highlight-on
-  &.dw-p-hd
-    background-color: hsl($uiHue, 100%, 76%);
+  &.dw-p-hd,
   &.dw-p-bd
-    background-color: hsl($uiHue, 100%, 86%);
-    // Place background above action buttons.
+    background-color: hsl($uiHue, 100%, 83%);
+    // Place -bd background above action buttons.
     z-index: 1;
 
 .dw-highlight-off

@@ -179,7 +179,7 @@ function renderDiscussionPage() {
   !Perf || Perf.start();
   var timeBefore = performance.now();
 
-  renderTitleBodyComments();
+  debiki2.renderTitleBodyComments();
 
   var timeAfterBodyComments = performance.now();
   if (Perf) {
@@ -195,7 +195,7 @@ function renderDiscussionPage() {
 
   var timeBeforeTimeAgo = performance.now();
   // Only process the header right now if there are many posts.
-  processTimeAgo($posts.length > 20 ? '.dw-ar-p-hd' : '');
+  debiki2.processTimeAgo($posts.length > 20 ? '.dw-ar-p-hd' : '');
   var timeAfterTimeAgo = performance.now();
 
   debiki2.ReactStore.initialize();
@@ -303,7 +303,7 @@ d.i.startEmbeddedEditor = function() {
 };
 
 if (location.pathname.search(ApiUrlPathPrefix) !== 0) {
-  sessionStorage.setItem('returnToSiteUrl', window.location.toString());
+  debiki2.putInSessionStorage('returnToSiteUrl', window.location.toString());
 }
 
 // Later, when there's a single router for everything, bind this to router events instead:
@@ -325,8 +325,11 @@ $(document).on('click', 'a.esMention', function(event) {
   var $this = $(this);
   var url = $this.attr('href');
   var username = url.replace('/-/users/', '');
-  debiki2.pagedialogs.getAboutUserDialog().openForUserIdOrUsername(username);
+  debiki2.morebundle.openAboutUserDialog(username);
 });
+
+
+d.u.addZoomOrResizeListener(debiki2.page.Hacks.addCanScrollHintsSoon);
 
 
 debiki2.dieIf(location.port && debiki.internal.serverOrigin.indexOf(':' + location.port) === -1,

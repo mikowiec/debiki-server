@@ -20,7 +20,6 @@ package debiki.dao
 import com.debiki.core._
 import debiki.DebikiHttp.ResultException
 import debiki.TextAndHtml
-import io.efdi.server.Who
 
 
 class FirstPostsAppSpec extends ReviewStuffAppSuite("4FY2") {
@@ -323,7 +322,7 @@ class FirstPostsAppSpec extends ReviewStuffAppSuite("4FY2") {
 
           info("insert a chat messages, it gets auto-approved")
           val firstChat = dao.insertChatMessage(TextAndHtml.testBody("chat_740331_a"), chatPageId,
-            who).post
+            who, dummySpamRelReqStuff).post
           firstChat.approvedById mustBe Some(SystemUserId)
 
           info("can still insert a reply")
@@ -333,7 +332,7 @@ class FirstPostsAppSpec extends ReviewStuffAppSuite("4FY2") {
 
           info("another chat message")
           val secondChat = dao.insertChatMessage(TextAndHtml.testBody("chat_740331_d"), chatPageId,
-            who).post
+            who, dummySpamRelReqStuff).post
           secondChat.approvedById mustBe Some(SystemUserId)
 
           info("can nevertheless insert reply 2")
@@ -343,7 +342,7 @@ class FirstPostsAppSpec extends ReviewStuffAppSuite("4FY2") {
 
           info("yet another chat message")
           val thirdChat = dao.insertChatMessage(TextAndHtml.testBody("chat_740331_f"), chatPageId,
-            who).post
+            who, dummySpamRelReqStuff).post
           thirdChat.approvedById mustBe Some(SystemUserId)
 
           info("rejct reply 3")

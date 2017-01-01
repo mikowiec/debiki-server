@@ -16,8 +16,8 @@
  */
 
 /// <reference path="../typedefs/jquery/jquery.d.ts" />
-/// <reference path="users/user-info/UserInfo.ts" />
 /// <reference path="model.ts" />
+/// <reference path="rules.ts" />
 /// <reference path="ServerApi.ts" />
 
 //------------------------------------------------------------------------------
@@ -46,12 +46,15 @@ interface RequestData {
   data: any;
   success: (response: any) => void;
   error?: (jqXhr: any, textStatus?: string, errorThrown?: string) => any;
+  showLoadingOverlay?: boolean;
 }
 
 
 function postJson(urlPath: string, requestData: RequestData) {
   var url = appendE2eAndForbiddenPassword(origin + urlPath);
+  var options = options || {};
   d.u.postJson({
+    showLoadingOverlay: options.showLoadingOverlay,
     url: url,
     data: requestData.data,
     success: requestData.success,
@@ -69,17 +72,20 @@ function postJson(urlPath: string, requestData: RequestData) {
 
 
 /** Return Server.IgnoreThisError from error(..) to suppress a log message and error dialog. */
-function postJsonSuccess(urlPath, success: (response: any) => void, data: any, error?) {
+function postJsonSuccess(urlPath, success: (response: any) => void, data: any, error?,
+        options?: { showLoadingOverlay?: boolean }) {
   // Make postJsonSuccess(..., error, data) work:
   if (!data || _.isFunction(data)) {
     var tmp = data;
     data = error;
     error = tmp;
   }
+  options = options || {};
   postJson(urlPath, {
     data: data,
     success: success,
-    error: error
+    error: error,
+    showLoadingOverlay: options.showLoadingOverlay,
   });
 }
 
@@ -139,15 +145,59 @@ function appendE2eAndForbiddenPassword(url: string) {
 
 
 var loadEditorScriptsStatus;
+var slowBundleStatus;
+var staffBundleStatus;
 
 
 // Won't call callback() until a bit later — so if you call React's setState(..), the
 // state will have changed.
 //
-export function loadEditorEtcScriptsAndLater(callback?) {
+export function loadEditorEtcScriptsAndLater(callback?) {  // RENAME? to loadEditorAndMoreBundles
   setTimeout(function() {
     loadEditorEtceteraScripts().done(callback || _.noop)
   }, 0);
+}
+
+
+export function loadMoreScriptsBundle(callback) {
+  if (slowBundleStatus) {
+    // Never call callback() immediately, because it's easier to write caller source code,
+    // if one knows that callback() will never be invoked immediately.
+    setTimeout(() => slowBundleStatus.done(callback), 0);
+    return;
+  }
+  slowBundleStatus = $.Deferred();
+  window['yepnope']({
+    both: [d.i.assetUrlPrefix + 'more-bundle.' + d.i.minMaxJs],
+    complete: () => {
+      slowBundleStatus.resolve();
+      setTimeout(callback, 0);
+    }
+  });
+  return slowBundleStatus;
+}
+
+
+export function loadStaffScriptsBundle(callback) {
+  if (staffBundleStatus) {
+    // Never call callback() immediately, because it's easier to write caller source code,
+    // if one knows that callback() will never be invoked immediately.
+    setTimeout(() => staffBundleStatus.done(callback), 0);
+    return;
+  }
+  staffBundleStatus = $.Deferred();
+  // The staff scripts bundle requires both more-bundle.js and editor-bundle.js (to render
+  // previews of CommonMark comments [7PKEW24]). This'll load them both.
+  loadEditorEtcScriptsAndLater(() => {
+    window['yepnope']({
+      both: [d.i.assetUrlPrefix + 'staff-bundle.' + d.i.minMaxJs],
+      complete: () => {
+        staffBundleStatus.resolve();
+        callback();  // setTimeout(..., 0) not needed — done by loadMoreScriptsBundle() already
+      }
+    });
+  });
+  return staffBundleStatus;
 }
 
 
@@ -164,12 +214,14 @@ export function loadEditorEtceteraScripts() {
   };
 
   loadEditorScriptsStatus = $.Deferred();
-  window['yepnope']({
-    both: [d.i.assetUrlPrefix + 'editor-etcetera.' + d.i.minMaxJs],
-    complete: () => {
-      window['ReactSelect'] = reactCreateFactory(window['Select']);
-      loadEditorScriptsStatus.resolve();
-    }
+  // The editor scripts bundle requires more-bundle.js.
+  loadMoreScriptsBundle(() => {
+    window['yepnope']({
+      both: [d.i.assetUrlPrefix + 'editor-bundle.' + d.i.minMaxJs],
+      complete: () => {
+        loadEditorScriptsStatus.resolve();
+      }
+    });
   });
   return loadEditorScriptsStatus;
 }
@@ -320,6 +372,7 @@ export function rejectEdits(post: PostToModerate, doneCallback: () => void) {
 
 
 function doSomethingWithPost(post: PostToModerate, actionUrl: string, success: () => void) {
+  die('EdE7KWWU0');
   postJsonSuccess(actionUrl, success, {
     pageId: post.pageId,
     postId: post.id,
@@ -410,6 +463,11 @@ export function listCompleteUsers(whichUsers,
 }
 
 
+export function sendAddressVerifEmailAgain(success) {
+  postJsonSuccess('/-/send-addr-verif-email-again', success, {});
+}
+
+
 export function sendInvite(toEmailAddress: string, success: (invite: Invite) => void,
       error: (failedRequest: HttpRequest) => ErrorPolicy) {
   postJsonSuccess('/-/send-invite', success, error, { toEmailAddress: toEmailAddress });
@@ -496,38 +554,6 @@ export function loadMyself(callback: (user: any) => void) {
 }
 
 
-export function loadUserInfo(userId, callback: (info: debiki2.users.UserInfo) => void) {
-  $.get(origin + '/-/load-user-info?userId=' + userId)
-    .done((response: any) => {
-      var userInfo = debiki2.users.UserInfo.fromJson(response.userInfo);
-      callback(userInfo);
-    })
-    .fail((x, y, z) => {
-      console.error('Error loading user info: ' + JSON.stringify([x, y, z]));
-      callback(null);
-    });
-}
-
-
-export function loadUserActions(userId,
-      callback: (actions: debiki2.users.ActionListItem[]) => void) {
-  $.get(origin + '/-/list-user-actions?userId=' + userId)
-    .done((response: any) => {
-      var actionItems: debiki2.users.ActionListItem[] = [];
-      for (var i = 0; i < response.actions.length; ++i) {
-        var json = response.actions[i];
-        var c = debiki2.users.ActionListItem.fromJson(json);
-        actionItems.push(c);
-      }
-      callback(actionItems);
-    })
-    .fail((x, y, z) => {
-      console.error('Error loading user actions: ' + JSON.stringify([x, y, z]));
-      callback(null);
-    });
-}
-
-
 export function loadNotifications(userId: number, upToWhenMs: number,
       success: (notfs: Notification[]) => void, error: () => void) {
   var query = '?userId=' + userId + '&upToWhenMs=' + upToWhenMs;
@@ -552,21 +578,6 @@ export function setTagNotfLevel(tagLabel: TagLabel, newNotfLevel: NotfLevel) {
     tagLabel: tagLabel,
     notfLevel: newNotfLevel
   });
-}
-
-
-
-export function loadUserPreferences(userId,
-      callback: (info: debiki2.users.UserPreferences) => void) {
-  $.get(origin + '/-/load-user-preferences?userId=' + userId)
-    .done((response: any) => {
-      var userPrefs = debiki2.users.UserPreferences.fromJson(response.userPreferences);
-      callback(userPrefs);
-    })
-    .fail((x, y, z) => {
-      console.error('Error loading user preferences: ' + JSON.stringify([x, y, z]));
-      callback(null);
-    });
 }
 
 
@@ -614,17 +625,6 @@ export function createForum(title: string, folder: string, success: (urlPath: st
 }
 
 
-export function loadForumCategories(forumPageId: string,
-      success?: (categories: Category[]) => void) {
-  // Perhaps should remove the forum id param? Since saves cats in the store cats list always.
-  dieIf(forumPageId !== theStore.pageId, 'EsE7YPK24');
-  get('/-/list-categories?forumId=' + forumPageId, (categories: Category[]) => {
-    ReactActions.setCategories(categories);
-    !success || success(categories);
-  });
-}
-
-
 export function loadForumCategoriesTopics(forumPageId: string, topicFilter: string,
       success: (categories: Category[]) => void) {
   var url = '/-/list-categories-topics?forumId=' + forumPageId;
@@ -640,6 +640,17 @@ export function loadForumTopics(categoryId: string, orderOffset: OrderOffset,
   var url = '/-/list-topics?categoryId=' + categoryId + '&' +
       ServerApi.makeForumTopicsQueryParams(orderOffset);
   get(url, (response: any) => {
+    ReactActions.patchTheStore({ usersBrief: response.users });
+    doneCallback(response.topics);
+  });
+}
+
+
+export function loadTopicsByUser(userId: UserId,
+        doneCallback: (topics: Topic[]) => void) {
+  var url = `/-/list-topics-by-user?userId=${userId}`;
+  get(url, (response: any) => {
+    ReactActions.patchTheStore({ usersBrief: response.users });
     doneCallback(response.topics);
   });
 }
@@ -857,16 +868,57 @@ export function startPrivateGroupTalk(title: string, text: string, pageRole: Pag
 }
 
 
-export function submitCustomForm(formInputNameValues, success: () => void) {
-  postJsonSuccess('/-/submit-custom-form', success, {
+export function submitCustomFormAsJsonReply(formInputNameValues, success?: () => void) {
+  postJsonSuccess('/-/submit-custom-form-as-json-reply', success, {
     pageId: d.i.pageId,
     formInputs: formInputNameValues,
   });
 }
 
 
+export function submitCustomFormAsNewTopic(formInputNameValues) {
+  function getOrDie(inpName: string): string {
+    let concatenatedValues = null;
+    _.each(formInputNameValues, (nameValue: any) => {
+      if (nameValue.name === inpName) {
+        let value = nameValue.value.trim();
+        value = value.replace(/\\n/g, '\n');
+        concatenatedValues = (concatenatedValues || '') + value;
+      }
+    });
+    dieIf(concatenatedValues === null, `Input missing: ${inpName} [EdE4WKFE02]`);
+    return concatenatedValues.trim();
+  }
+
+  function goToNewPage(response) {
+    location.assign(linkToPageId(response.newPageId));
+  }
+
+  postJsonSuccess('/-/submit-custom-form-as-new-topic', goToNewPage, {
+    newTopicTitle: getOrDie('title'),
+    newTopicBody: getOrDie('body'),
+    pageTypeId: getOrDie('pageTypeId'),
+    categorySlug: getOrDie('categorySlug'),
+  });
+}
+
+
+export function loadPostByNr(pageId: PageId, postNr: PostNr, success: (patch: StorePatch) => void) {
+  get(`/-/load-post?pageId=${pageId}&postNr=${postNr}`, success);
+}
+
+
+export function loadPostsByAuthor(authorId: UserId, success: (response) => void,
+    error?: () => void) {
+  get(`/-/list-posts?authorId=${authorId}`, success);
+}
+
+
 export function flagPost(postId: string, flagType: string, reason: string, success: () => void) {
-  postJsonSuccess('/-/flag', success, {
+  postJsonSuccess('/-/flag', (storePatch: StorePatch) => {
+    ReactActions.patchTheStore(storePatch);
+    if (success) success();
+  }, {
     pageId: d.i.pageId,
     postId: postId,
     type: flagType,
@@ -954,6 +1006,18 @@ export function saveCategory(data, success: (response: any) => void, error?: () 
 }
 
 
+export function deleteCategory(categoryId: number, success: (StorePatch: any) => void,
+      error?: () => void) {
+  postJsonSuccess('/-/delete-category', success, error, { categoryId: categoryId });
+}
+
+
+export function undeleteCategory(categoryId: number, success: (StorePatch: any) => void,
+      error?: () => void) {
+  postJsonSuccess('/-/undelete-category', success, error, { categoryId: categoryId });
+}
+
+
 export function loadCategory(id: number, success: (response: any) => void) {
   get('/-/load-category?id=' + id, success);
 }
@@ -999,6 +1063,12 @@ export function undeletePages(pageIds: PageId[], success: () => void) {
 export function markCurrentPageAsSeen() {
   // COULD avoid showing the is-POSTing-data overlay.
   postJsonSuccess('/-/mark-as-seen?pageId=' + d.i.pageId, () => {}, {});
+}
+
+
+
+export function search(rawQuery: string, success: (results: SearchResults) => void) {
+  postJsonSuccess('/-/search', success, { rawQuery: rawQuery });
 }
 
 
@@ -1078,9 +1148,23 @@ export function updateSites(sites: SASite[]) {
 }
 
 
-export function logBrowserError(errorMessage: string) {  // rename to logError
-  postJsonSuccess('/-/log-browser-error', () => {}, errorMessage);
+var pendingErrors = [];
+
+export function logError(errorMessage: string) {
+  pendingErrors.push(errorMessage);
+  postPendingErrorsThrottled();
 }
+
+
+var postPendingErrorsThrottled = _.throttle(function() {
+  if (!pendingErrors.length)
+    return;
+  postJsonSuccess('/-/log-browser-errors', () => {}, pendingErrors, null, { showLoadingOverlay: false });
+  pendingErrors = [];
+}, 5000);
+
+// Will this work? Doesn't seem to work. Why not? Oh well.
+window.addEventListener('unload', postPendingErrorsThrottled.flush);
 
 
 //------------------------------------------------------------------------------

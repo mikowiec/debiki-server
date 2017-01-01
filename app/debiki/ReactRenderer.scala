@@ -216,7 +216,7 @@ object ReactRenderer extends com.debiki.core.CommonMarkRenderer {
     if (Globals.isTestDisableScripts)
       return "Scripts disabled [EsM44GY0]"
     def sanitizeWith(engine: js.Invocable): String = {
-      val safeHtml = engine.invokeFunction("sanitizeHtml", text)
+      val safeHtml = engine.invokeFunction("sanitizeHtmlServerSide", text)
       safeHtml.asInstanceOf[String]
     }
     javascriptEngine match {
@@ -330,7 +330,7 @@ object ReactRenderer extends com.debiki.core.CommonMarkRenderer {
         |
         |function renderReactServerSide() {
         |  try {
-        |    return renderTitleBodyCommentsToString();
+        |    return debiki2.renderTitleBodyCommentsToString();
         |  }
         |  catch (e) {
         |    printStackTrace(e);
@@ -343,7 +343,7 @@ object ReactRenderer extends com.debiki.core.CommonMarkRenderer {
 
     var javascriptStream: jio.InputStream = null
     try {
-      val path = s"/public/res/renderer$min.js"
+      val path = s"/public/res/server-bundle$min.js"
       javascriptStream = getClass.getResourceAsStream(path)
       if (javascriptStream eq null) {
         val message = s"Script not found: $path, 'gulp build' has not been run or isn't done?"
@@ -430,9 +430,12 @@ object ReactRenderer extends com.debiki.core.CommonMarkRenderer {
     |  return "Error rendering CommonMark on server [DwE4XMYD8]";
     |}
     |
-    |function sanitizeHtml(source) {
+    |// (Don't name this function 'sanitizeHtml' because it'd then get overwritten by
+    |// a function with that same name from a certain sanitize-html npm module.)
+    |function sanitizeHtmlServerSide(source) {
     |  try {
     |    source = source.replace(/<a /, "<a rel='nofollow' ")
+    |    // This function calls both Google Caja and the sanitize-html npm module. RENAME.
     |    return googleCajaSanitizeHtml(source, false, false);
     |  }
     |  catch (e) {

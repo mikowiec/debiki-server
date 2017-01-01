@@ -20,18 +20,14 @@
 /// <reference path="../prelude.ts" />
 /// <reference path="../utils/utils.ts" />
 /// <reference path="../utils/react-utils.ts" />
-/// <reference path="../dialogs.ts" />
 /// <reference path="../help/help.ts" />
-/// <reference path="../editor/title-editor.ts" />
-/// <reference path="../edit-history/edit-history-dialog.ts" />
 /// <reference path="../topbar/topbar.ts" />
-/// <reference path="../page-dialogs/wikify-dialog.ts" />
-/// <reference path="../page-dialogs/delete-post-dialog.ts" />
-/// <reference path="../page-dialogs/see-wrench-dialog.ts" />
 /// <reference path="../help/help.ts" />
 /// <reference path="../model.ts" />
+/// <reference path="../rules.ts" />
 /// <reference path="post-actions.ts" />
 /// <reference path="chat.ts" />
+/// <reference path="../more-bundle-not-yet-loaded.ts" />
 
 //------------------------------------------------------------------------------
    module debiki2.page {
@@ -40,7 +36,6 @@
 var React = window['React']; // TypeScript file doesn't work
 var r = React.DOM;
 var $: JQueryStatic = debiki.internal.$;
-var ReactBootstrap: any = window['ReactBootstrap'];
 
 var closedIcon = r.span({ className: 'icon-block' });
 var questionIcon = r.span({ className: 'icon-help-circled' });
@@ -53,8 +48,8 @@ var doneIcon = r.span({ className: 'icon-check' });
 
 
 export var TitleBodyComments = createComponent({
-  makeHelpMessage: function() {
-    var store: Store = this.props;
+  makeHelpMessage: function(): HelpMessage {
+    var store: Store = this.props.store;
     var me: Myself = store.me;
     var bodyPost = store.allPosts[BodyId];
 
@@ -90,16 +85,16 @@ export var TitleBodyComments = createComponent({
 
     if (store.pageRole === PageRole.Problem) {
       if (store.pageDoneAtMs) {
-        return { id: 'EsH5GKU0', version: 1, content: r.div({},
+        return { id: 'EsH5GKU0', version: 1, className: 'esH_ProblemSolved', content: r.div({},
             "This is a problem and it has been ", doneIcon, " solved.") };
       }
       else if (store.pagePlannedAtMs) {
-        return { id: 'EsH2PK40', version: 1, content: r.div({},
+        return { id: 'EsH2PK40', version: 1, className: 'esH_ProblemFixing', content: r.div({},
             "This is a problem. Someone is ", plannedIcon, " fixing it, but it's not yet ",
             doneIcon, " done.") };
       }
       else {
-        return { id: 'EsH1WKG5', version: 1, content: r.div({},
+        return { id: 'EsH1WKG5', version: 1, className: 'esH_ProblemNew', content: r.div({},
             "This is a ", problemIcon, " problem. It's not yet ", doneIcon, " solved.") };
       }
     }
@@ -131,7 +126,8 @@ export var TitleBodyComments = createComponent({
           "This is a ", plannedIcon, " todo task, not yet ", doneIcon, " done.") };
       }
     }
-    if (store.pageRole === PageRole.Critique) {  // [plugin]
+
+    if (store.pageRole === PageRole.Critique) {  // [plugin]. Dupl code, (39pKFU0) below
       if (store.pageClosedAtMs) {
         return { id: 'EdH4KDPU2', version: 1, content: r.span({},
           "This topic has been ", closedIcon, "closed. People won't get any additional " +
@@ -139,7 +135,7 @@ export var TitleBodyComments = createComponent({
       }
       if (!me.isAuthenticated) {
         // Could explain: here someone has asked for critique. X people have answered,
-        // see the Replies section below. And there are Y chat comments or status updates.
+        // see the Replies section below.
         return null;
       }
       else {
@@ -154,10 +150,52 @@ export var TitleBodyComments = createComponent({
                 r.p({}, "Now you have asked for critique. You'll be notified via email later " +
                   "when you get critique."),
                 r.p({},
-                  "If you want to proofread and edit your text below, to make sure it asks for " +
-                  "the right things and is easy to understand, then, to edit it, " +
+                  "Next, proofread your text below, to make sure it asks for " +
+                  "the right things and is easy to understand. To edit it, " +
                   "click the edit icon (", r.span({ className: 'icon-edit' }),
                   ") just below your post.")) };
+          }
+        }
+        else {
+          return { id: 'EdH7YM21', version: 1, content: r.span({},
+            "Click ", r.b({}, "Give Critique"), " below, to critique this — then you'll " +
+            "get credits, which you can use to ask for critique yourself.") };
+        }
+      }
+    }
+
+    if (store.pageRole === PageRole.UsabilityTesting) {  // [plugin]. Dupl code, (39pKFU0) above
+      if (store.pageClosedAtMs) {
+        return { id: 'EdH5KFEW3', version: 1, content: r.span({},
+          "This topic has been ", closedIcon, "closed. Find another topic, if you are going " +
+          "to do usability testing.") };
+      }
+      if (!me.isAuthenticated) {
+        // Could explain: here someone has asked for usability testing. X people have answered,
+        // see the Replies section below.
+        return null;
+      }
+      else {
+        var isPageAuthor = bodyPost.authorIdInt === me.userId;
+        if (isPageAuthor) {
+          if (store.numPostsRepliesSection) {
+            return { id: 'EdH5P0WF2', version: 1, content: r.span({},
+              "There's a reply to you below — is it a usability testing video link?") };
+          }
+          else {
+            return { id: 'EdH5PK2W', version: 1, alwaysShow: true, className: 's_UtxHelp_HaveAsked',
+              content: r.div({},
+                r.h1({ className: 's_UtxHelp_HaveAsked_Title' },
+                  "Now you have asked for usability testing."),
+                r.p({}, "You'll be notified via email, " +
+                  "when someone has recorded a video for you."),
+                r.p({},
+                  "Proofread your text below, to make sure it asks for " +
+                  "the right things and is easy to understand. To edit it, " +
+                  "click the edit icon (", r.span({ className: 'icon-edit' }),
+                  ") just below your post. — Thereafter, click Continue."),
+                r.a({ className: 's_UtxHelp_HaveAsked_ContinueB btn btn-primary',
+                    href: '/record-a-video' }, "Continue")) };
           }
         }
         else {
@@ -172,7 +210,7 @@ export var TitleBodyComments = createComponent({
   },
 
   render: function() {
-    var store: Store = this.props;
+    var store: Store = this.props.store;
 
     var anyHelpMessage = this.makeHelpMessage();
     anyHelpMessage = anyHelpMessage
@@ -279,7 +317,7 @@ export var Title = createComponent({
     var anyShowForumInroBtn;
     if (!this.props.hideButtons && store.pageRole === PageRole.Forum && store.hideForumIntro) {
       var introPost = store.allPosts[BodyId];
-      if (introPost && !introPost.isPostHidden) {
+      if (introPost && !introPost.isBodyHidden) {
         // Don't show button too early — doing that would make server side and client side
         // React generated html differ.
         if (store.userSpecificDataAdded) {
@@ -300,10 +338,13 @@ export var Title = createComponent({
     if (this.state.isEditing) {
       var editorProps = _.clone(this.props);
       editorProps.closeEditor = this.closeEditor;
-      contents = debiki2.titleeditor.TitleEditor(editorProps);
+      contents = morebundle.TitleEditor(editorProps);
     }
     else {
-      var pinClass = this.props.pinWhere ? ' icon-pin' : '';
+      var pinOrHiddenClass = this.props.pinWhere ? ' icon-pin' : '';
+      if (store.pageHiddenAtMs) {
+        pinOrHiddenClass = ' icon-eye-off';
+      }
       var tooltip = '';
       var icon;
       // (Some dupl code, see PostActions below and isDone() and isAnswered() in forum.ts [4KEPW2]
@@ -386,17 +427,18 @@ export var Title = createComponent({
         default:
       }
 
-      var deletedIcon = !store.pageDeletedAtMs ? null :
-        r.span({ className: 'icon-trash', title: "This page has been deleted." });
-
-      if (store.pageDeletedAtMs) {
+      let deletedIcon;
+      if (store_isPageDeleted(store)) {
+        let deletedReason = store.pageDeletedAtMs ?
+            "This page has been deleted" : "Category deleted, so this page was deleted too";
+        deletedIcon = r.span({ className: 'icon-trash', title: deletedReason });
         titleText = r.span({ className: 'esOP_title-deleted' }, titleText);
       }
 
       contents =
           r.div({ className: 'dw-p-bd' },
             r.div({ className: 'dw-p-bd-blk' },
-              r.h1({ className: 'dw-p-ttl' + pinClass, title: tooltip },
+              r.h1({ className: 'dw-p-ttl' + pinOrHiddenClass, title: tooltip },
                 deletedIcon, titlePendingApprovalMessage,
                 icon, titleText,
                 anyShowForumInroBtn, anyEditTitleBtn)));
@@ -427,6 +469,20 @@ var RootPostAndComments = createComponent({
     return { showClickReplyInstead: false };
   },
 
+  loadAndShowRootPost: function(event) {
+    event.preventDefault();
+    let store: Store = this.props;
+    ReactActions.loadAndShowPost(store.rootPostId);
+  },
+
+  onOrigPostReplyClick: function() {
+    // Dupl code [69KFUW20]
+    debiki2.morebundle.loginIfNeededReturnToPost('LoginToComment', BodyId, function() {
+      editor.toggleWriteReplyToPost(BodyId, PostType.Normal);
+    });
+  },
+
+  /*
   onChatReplyClick: function() {
     // Unless shown alraedy, or read already, show a tips about clicking "Reply" instead.
     var hasReadClickReplyTips = debiki2.help.isHelpMessageClosed(this.props, clickReplyInsteadHelpMessage);
@@ -436,13 +492,13 @@ var RootPostAndComments = createComponent({
     else {
       this.setState({ showClickReplyInstead: true });
     }
-  },
+  }, */
 
   render: function() {
     var store: Store = this.props;
     var allPosts: { [postId: number]: Post; } = this.props.allPosts;
     var me = store.me;
-    var rootPost = allPosts[this.props.rootPostId];
+    var rootPost: Post = allPosts[this.props.rootPostId];
     if (!rootPost)
       return r.p({}, '(Root post missing, id: ' + this.props.rootPostId +
           ', these are present: ' + _.keys(allPosts) + ' [DwE8WVP4])');
@@ -451,6 +507,7 @@ var RootPostAndComments = createComponent({
     var threadClass = 'dw-t dw-depth-0' + horizontalCss(this.props.horizontalLayout);
     var postIdAttr = 'post-' + rootPost.postId;
     var postClass = 'dw-p';
+    if (post_shallRenderAsHidden(rootPost)) postClass += ' s_P-Hdn';
     var postBodyClass = 'dw-p-bd';
     if (isBody) {
       threadClass += ' dw-ar-t';
@@ -464,11 +521,21 @@ var RootPostAndComments = createComponent({
 
     var body = null;
     if (pageRole !== PageRole.EmbeddedComments) {
+      let bodyContent;
+      if (post_shallRenderAsHidden(rootPost)) {
+        bodyContent = (
+            r.div({ className: 'dw-p-bd-blk esOrigPost', onClick: this.loadAndShowRootPost },
+              "Post hidden; click to show"));
+      }
+      else {
+        bodyContent = (
+            r.div({ className: 'dw-p-bd-blk esOrigPost',
+              dangerouslySetInnerHTML: { __html: rootPost.sanitizedHtml }}));
+      }
       body =
         r.div({ className: postClass, id: postIdAttr },
           r.div({ className: postBodyClass },
-            r.div({ className: 'dw-p-bd-blk esOrigPost',
-              dangerouslySetInnerHTML: { __html: rootPost.sanitizedHtml }})));
+            bodyContent));
     }
 
     if (!page_isDiscussion(pageRole)) {
@@ -544,7 +611,7 @@ var RootPostAndComments = createComponent({
     // it'd be hard & take long to make them simpler to understand.
     var hasChat = false; // hasChatSection(store.pageRole);
 
-    var flatComments = [];
+    var flatComments = []; /*
     if (hasChat) _.each(store.allPosts, (child: Post, childId) => {
       if (!child || child.postType !== PostType.Flat)
         return null;
@@ -559,14 +626,14 @@ var RootPostAndComments = createComponent({
       flatComments.push(
         r.li({ key: childId },
           Thread(threadProps)));
-    });
+    }); */
 
-    var chatSection;
+    var chatSection; /* Perhaps add back later — but probably not? [8KB42]
     if (hasChat) {
       var anyClickReplyInsteadHelpMessage = this.state.showClickReplyInstead
           ? debiki2.help.HelpMessageBox({ large: true, message: clickReplyInsteadHelpMessage })
           : null;
-      var chatSection =
+      chatSection =
         r.div({},
           r.div({ className: 'dw-chat-title', id: 'dw-chat' },
             store.numPostsChatSection + " chat comments"),
@@ -581,16 +648,25 @@ var RootPostAndComments = createComponent({
                   " or post a status update. — However, to reply to someone, " +
                   "instead click Reply just below his or her post." },
               " Add chat comment")));
-    }
+    } */
 
     var flatRepliesClass = repliesAreFlat ? ' dw-chat' : ''; // rename dw-chat... to dw-flat?
+
+    let postActions = post_shallRenderAsHidden(rootPost) ? null :
+         PostActions({ store: this.props, post: rootPost });
+
+    let origPostReplyButton = _.every(threadedChildren, c => _.isEmpty(c)) ? null :
+      r.div({ className: 's_APAs'},
+        r.a({ className: 's_APAs_OPRB dw-a dw-a-reply icon-reply',
+            onClick: this.onOrigPostReplyClick },
+          makeReplyBtnTitle(store, rootPost, true)));
 
     return (
       r.div({ className: threadClass },
         bodyPendingApprovalMessage,
         body,
         solvedBy,
-        PostActions({ store: this.props, post: rootPost }),
+        postActions,
         debiki2.page.Metabar(),
         anyHorizontalArrowToChildren,
         // try to remove the dw-single-and-multireplies div + the dw-singlereplies class,
@@ -598,6 +674,7 @@ var RootPostAndComments = createComponent({
         r.div({ className: 'dw-single-and-multireplies' + flatRepliesClass },
           r.ol({ className: 'dw-res dw-singlereplies' },
             threadedChildren)),
+        origPostReplyButton,
         chatSection));
   },
 });
@@ -745,7 +822,7 @@ var Thread = createComponent({
       });
     }
 
-    var actions = isCollapsed(post)
+    var actions = isCollapsed(post) || post_shallRenderAsHidden(post)
       ? null
       : PostActions({ store: this.props, post: post,
           onClick: this.onAnyActionClick });
@@ -758,8 +835,9 @@ var Thread = createComponent({
     var anyWrongWarning = this.props.abbreviate ? null : makeWrongWarning(post);
 
     var showAvatar = !renderCollapsed && this.props.depth === 1 && !this.props.is2dTreeColumn;
-    var anyAvatar = !showAvatar ? null : avatar.Avatar({ user: store_authorOf(store, post) });
     var avatarClass = showAvatar ? ' ed-w-avtr' : '';
+    var anyAvatar = !showAvatar ? null :
+        avatar.Avatar({ user: store_getAuthorOrMissing(store, post) });
 
     var postProps = _.clone(this.props);
     postProps.post = post;
@@ -888,12 +966,13 @@ export var Post = createComponent({
     else if (!post.isApproved && !post.sanitizedHtml) {
       // (Dupl code, for anyAvatar [503KP25])
       var showAvatar = this.props.depth > 1 || this.props.is2dTreeColumn;
-      var author: BriefUser = store_authorOf(store, post);
+      var author: BriefUser = this.props.author || // author specified here: [4WKA8YB]
+          store_getAuthorOrMissing(store, post);
       var anyAvatar = !showAvatar ? null : avatar.Avatar({ tiny: true, user: author });
       headerElem =
           r.div({ className: 'dw-p-hd' },
             anyAvatar,
-            'Hidden comment pending approval, posted ', timeAgo(post.createdAt), '.');
+            'Comment pending approval, posted ', timeAgo(post.createdAtMs), '.');
       extraClasses += ' dw-p-unapproved';
     }
     else {
@@ -949,6 +1028,9 @@ export var Post = createComponent({
     if (isFlat)
       extraClasses += ' dw-p-flat';
 
+    if (post_shallRenderAsHidden(post))
+      extraClasses += ' s_P-Hdn';
+
     var unwantedCross;
     if (post.numUnwantedVotes) {
       extraClasses += ' dw-unwanted dw-unwanted-' + post.numUnwantedVotes;
@@ -999,10 +1081,13 @@ var ReplyReceivers = createComponent({
         receivers.push(r.i({ key: repliedToId }, 'Unknown [DwE4KFYW2]'));
         continue;
       }
-      var author = store_authorOf(store, post);
+      var author = store_getAuthorOrMissing(store, post);
       var link =
         r.a({ href: '#post-' + post.postId, className: 'dw-rr', key: post.postId },
-          author.username || author.fullName);
+          author.username || author.fullName,
+          // Append an up arrow to indicate that clicking the name will scroll up,
+          // rather than opening an about-user dialog. ⬆ is Unicode upwards-black-arrow U+2B06.
+          r.span({ className: '-RRs_RR_Aw' }, '⬆'));
       if (receivers.length) {
         link = r.span({ key: post.postId }, ' and', link);
       }
@@ -1019,7 +1104,7 @@ var ReplyReceivers = createComponent({
 
 export var PostHeader = createComponent({
   onUserClick: function(event) {
-    debiki2.pagedialogs.getAboutUserDialog().open(this.props.post);
+    morebundle.openAboutUserDialogForAuthor(this.props.post);
     event.preventDefault();
     event.stopPropagation();
   },
@@ -1060,7 +1145,8 @@ export var PostHeader = createComponent({
       : null;
 
     // (Dupl code, for anyAvatar [503KP25])
-    var author: BriefUser = store_authorOf(store, post);
+    var author: BriefUser = this.props.author || // author specified here: [4WKA8YB]
+        store_getAuthorOrMissing(store, post);
     var showAvatar = this.props.depth > 1 || this.props.is2dTreeColumn;
     var anyAvatar = !showAvatar ? null : avatar.Avatar({ tiny: true, user: author });
 
@@ -1080,8 +1166,8 @@ export var PostHeader = createComponent({
     }
 
     var editInfo = null;
-    if (post.lastApprovedEditAt) {
-      var editedAt = prettyLetterTimeAgo(post.lastApprovedEditAt);
+    if (post.lastApprovedEditAtMs) {
+      var editedAt = prettyLetterTimeAgo(post.lastApprovedEditAtMs);
       //var byVariousPeople = post.numEditors > 1 ? ' by various people' : null;
       editInfo =
           r.span({ onClick: this.showEditHistory, className: 'esP_viewHist icon-edit',
@@ -1165,7 +1251,7 @@ export var PostHeader = createComponent({
           r[linkFn](userLinkProps, fullName, username),
           // COULD add "Posted on ..." tooltip.
           this.props.exactTime ?
-              timeExact(post.createdAt, timeClass) : timeAgo(post.createdAt, timeClass),
+              timeExact(post.createdAtMs, timeClass) : timeAgo(post.createdAtMs, timeClass),
           editInfo,
           inReplyTo,
           toggleCollapsedButton,
@@ -1175,6 +1261,12 @@ export var PostHeader = createComponent({
 
 
 export var PostBody = createComponent({
+  loadAndShow: function(event) {
+    event.preventDefault();
+    let post: Post = this.props.post;
+    ReactActions.loadAndShowPost(post.postId);
+  },
+
   render: function() {
     var post: Post = this.props.post;
     if (post.summarize) {
@@ -1184,7 +1276,17 @@ export var PostBody = createComponent({
             r.p({}, post.summary))));
     }
     var body;
-    if (this.props.abbreviate) {
+    if (post_shallRenderAsHidden(post)) {
+      body = r.div({ className: 'dw-p-bd-blk', onClick: this.loadAndShow },
+        "Post hidden; click to show");
+    }
+    else if (this.props.abbreviate) {
+      // SHOULD OPTIMIZE COULD_OPTIMIZE don't create new <div>s here over and over again.
+      // COULD Rename 'length' below to maxCharsToShow?
+      // Include the first maxCharsToShow chars, but don't count chars inside tags, e.g.
+      // <a href="......."> because a URL can sometimes be 120 chars and then nothing
+      // would be shown at all (if we counted the tokens inside the <a> tag).
+      // Do this by parsing the sanitized html and then calling text().
       this.textDiv = this.textDiv || $('<div></div>');
       this.textDiv.html(post.sanitizedHtml);
       var length = Math.min(screen.width, screen.height) < 500 ? 90 : 120;

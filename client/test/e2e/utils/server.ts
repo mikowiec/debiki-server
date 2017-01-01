@@ -8,6 +8,7 @@ import _ = require('lodash');
 import assert = require('assert');
 import settings = require('./settings');
 import logAndDie = require('./log-and-die');
+import utils = require('./utils');
 var logUnusual = logAndDie.logUnusual, die = logAndDie.die, dieIf = logAndDie.dieIf;
 var logMessage = logAndDie.logMessage;
 
@@ -87,8 +88,12 @@ function getOrDie(url) {
 
 function showResponse(response) {
   var bodyString = response.body;
+  if (!_.isString(bodyString) && bodyString.toString) {
+    bodyString = bodyString.toString('utf8');
+  }
   if (!_.isString(bodyString)) {
-    bodyString = response.getBody('utf8');
+    bodyString = "(The response body is not a string, and has no toString function. " +
+        "Don't know how to show it. [EdE7BXE2I])"
   }
   return (
       "Response status code: " + response.statusCode + " (should have been 200)\n" +
@@ -107,7 +112,8 @@ function showResponseBodyJson(body) {
 
 
 function importSiteData(siteData: SiteData): IdAddress {
-  var url = settings.mainSiteOrigin + '/-/import-site';
+  var deleteOldSite = settings.deleteOldSite ? '?deleteOldSite=true' : '';
+  var url = settings.mainSiteOrigin + '/-/import-site' + deleteOldSite;
   var ids = postOrDie(url, siteData).bodyJson();
   dieIf(!ids.id, "No site id in import-site response [EsE7UGK2]",
       showResponseBodyJson(ids));
@@ -115,9 +121,22 @@ function importSiteData(siteData: SiteData): IdAddress {
 }
 
 
-function getLastEmailSenTo(email: string): EmailSubjectBody {
-  var response = getOrDie(settings.mainSiteOrigin + '/-/last-e2e-test-email?sentTo=' + email);
+function getLastEmailSenTo(siteId: SiteId, email: string): EmailSubjectBody {
+  var response = getOrDie(settings.mainSiteOrigin + '/-/last-e2e-test-email?sentTo=' + email +
+    '&siteId=' + siteId);
   return JSON.parse(response.body);
+}
+
+
+function getLastVerifyEmailAddressLinkEmailedTo(siteId: SiteId, emailAddress: string): string {
+  var email = getLastEmailSenTo(siteId, emailAddress);
+  return utils.findFirstLinkToUrlIn('https?://.*/-/login-password-confirm-email', email.bodyHtmlText);
+}
+
+
+function getLastUnsubscriptionLinkEmailedTo(siteId: SiteId, emailAddress: string): string {
+  var email = getLastEmailSenTo(siteId, emailAddress);
+  return utils.findFirstLinkToUrlIn('https?://.*/-/unsubscribe', email.bodyHtmlText);
 }
 
 
@@ -125,5 +144,7 @@ export = {
   initOrDie: initOrDie,
   importSiteData: importSiteData,
   getLastEmailSenTo: getLastEmailSenTo,
+  getLastVerifyEmailAddressLinkEmailedTo: getLastVerifyEmailAddressLinkEmailedTo,
+  getLastUnsubscriptionLinkEmailedTo: getLastUnsubscriptionLinkEmailedTo,
 };
 

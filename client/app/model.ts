@@ -16,7 +16,6 @@
  */
 
 /// <reference path="constants.ts" />
-/// <reference path="rules.ts" />
 
 type PageId = string;
 type PostId = number;
@@ -42,7 +41,7 @@ type HttpRequest = XMLHttpRequest
 // continue with its default error handling — it'll ignore the error.
 // Send back undefined or anything else to the caller, and the error will be considered.
 type ErrorPolicy = number | void;
-var IgnoreThisError = -112233;
+var IgnoreThisError: ErrorPolicy = -112233;
 
 var TitleId = 0;
 var BodyPostId = 1;
@@ -64,9 +63,9 @@ interface PostToModerate {
   numPendingFlags?: number;
   numPendingEditSuggestions?: number;
   pendingFlags?: any[];
-  postHiddenAt?: string;
-  postDeletedAt?: string;
-  treeDeletedAt?: string;
+  postHiddenAt?: string;  // change to millis
+  postDeletedAt?: string;  // change to millis
+  treeDeletedAt?: string;  // change to millis
 }
 
 
@@ -83,7 +82,27 @@ interface ReviewTask {
   user?: BriefUser;
   pageId?: string;
   pageTitle?: string;
-  post?: any;
+  post?: PostToReview;
+}
+
+
+interface PostToReview {
+  pageId: PageId;
+  nr: PostNr;
+  uniqueId: PostId;
+  createdBy?: UserId;
+  currentSource: string;
+  currRevNr: number;
+  currRevComposedBy?: UserId;
+  approvedSource?: string;
+  approvedHtmlSanitized?: string;
+  approvedRevNr?: number;
+  // approvedRevComposedById
+  //approvedRevApprovedById
+  // better: post.lastApporvedRevision.approvedById
+  bodyHiddenAtMs?: number;
+  bodyHiddenById?: UserId;
+  bodyHiddenReason?: string;
 }
 
 
@@ -110,8 +129,8 @@ interface Post {
   // these author* are deprecated, should add an author: {...} object instead.
   authorId: string; // COULD change to int and then rename authorIdInt below to authorId.
   authorIdInt: number;
-  createdAt: string;
-  lastApprovedEditAt: string;
+  createdAtMs: number;
+  lastApprovedEditAtMs: number;
   numEditors: number;
   numLikeVotes: number;
   numWrongVotes: number;
@@ -121,7 +140,7 @@ interface Post {
   summarize: boolean;
   summary?: string;
   squash: boolean;
-  isPostHidden?: boolean;
+  isBodyHidden?: boolean;
   isTreeDeleted: boolean;
   isPostDeleted: boolean;
   // === true means totally collapsed. === 'Truncated' means collapsed but parts of post shown.
@@ -135,6 +154,15 @@ interface Post {
   childIdsSorted: number[];
   sanitizedHtml?: string;
   tags?: string[];
+  numPendingFlags?: number;
+  numHandledFlags?: number;
+}
+
+
+interface PostWithPage extends Post {
+  pageId: PageId;
+  pageTitle: string;
+  pageRole: PageRole;
 }
 
 
@@ -185,7 +213,8 @@ interface Myself {
   restrictedCategories: Category[];
 
   votes: any;
-  unapprovedPosts: any;
+  unapprovedPosts: { [id: number]: Post };
+  unapprovedPostAuthors: BriefUser[];
   postIdsAutoReadLongAgo: number[];
   postIdsAutoReadNow: number[];
   marksByPostId: { [postId: number]: any };
@@ -216,6 +245,8 @@ interface HelpMessage {
   id: string;
   version: number;
   content: any;
+  className?: string;
+  alwaysShow?: boolean;
 }
 
 
@@ -233,6 +264,7 @@ interface Category {
   onlyStaffMayCreateTopics?: boolean;
   isDefaultCategory?: boolean;
   isForumItself?: boolean;
+  isDeleted?: boolean;
 }
 
 
@@ -242,36 +274,31 @@ interface Topic {
   title: string;
   url: string;
   categoryId: number;
-  author?: BriefUser;
-  // The other author* fields below are deprecated.
-  authorId: number;
-  authorUsername?: number;
-  authorFullName?: number;
-  authorAvatarUrl?: string;
-  lastReplyer?: BriefUser;
-  frequentPosters: BriefUser[];
+  authorId: UserId;
+  lastReplyerId?: UserId;
+  frequentPosterIds: UserId[];
   pinOrder?: number;
   pinWhere?: PinPageWhere;
   excerpt?: string;
+  firstImageUrls?: string[];
+  popularRepliesImageUrls?: string[];
   numPosts: number;
   numLikes: number;
   numWrongs: number;
-  createdEpoch: string; // try to remove
   createdAtMs: number;
-  bumpedEpoch: string; // try to remove
   bumpedAtMs: number;
-  lastReplyAtMs: string;
-  lastReplyEpoch: string; // try to remove
+  lastReplyAtMs: number;
   numOrigPostReplies: number;
   numOrigPostLikes: number;
-  answeredAtMs?: string;
+  answeredAtMs?: number;
   answerPostUniqueId?: number;
-  plannedAtMs?: string;
-  doneAtMs?: string;
-  closedAtMs?: string;
-  lockedAtMs?: string;
-  frozenAtMs?: string;
-  deletedAtMs?: string;
+  plannedAtMs?: number;
+  doneAtMs?: number;
+  closedAtMs?: number;
+  lockedAtMs?: number;
+  frozenAtMs?: number;
+  hiddenAtMs?: number;
+  deletedAtMs?: number;
 }
 
 
@@ -280,7 +307,7 @@ enum TopicSortOrder { BumpTime = 1, LikesAndBumpTime };
 
 interface OrderOffset {  // COULD rename to TopicQuery? (because includes filter too now)
   sortOrder: TopicSortOrder;
-  time?: number;
+  whenMs?: number;
   numLikes?: number;
   topicFilter?: string;
 }
@@ -336,6 +363,7 @@ interface Store {
   hideForumIntro?: boolean;
   pageRole: PageRole;
   pagePath: PagePath;
+  pageLayout?: TopicListLayout;
   pageHtmlTagCssClasses?: string;
   pageHtmlHeadTitle?: string;
   pageHtmlHeadDescription?: string;
@@ -349,6 +377,7 @@ interface Store {
   pageClosedAtMs?: number;
   pageLockedAtMs?: number;
   pageFrozenAtMs?: number;
+  pageHiddenAtMs?: number;
   pageDeletedAtMs?: number;
   numPosts: number;
   numPostsRepliesSection: number;
@@ -390,8 +419,12 @@ interface Store {
 
 
 interface SiteSettings {
+  inviteOnly: boolean;
+  allowSignup: boolean;
+  allowLocalSignup: boolean;
   allowGuestLogin: boolean;
   showComplicatedStuff: boolean;
+  numFlagsToHidePost: number;
 }
 
 
@@ -403,12 +436,14 @@ interface PagePath {
 }
 
 
-interface Ancestor {
+interface Ancestor {  // server side: [6FK02QFV]
   categoryId: number;
   title: string;
   path: string;
   unlisted?: boolean;
   staffOnly?: boolean;
+  onlyStaffMayCreateTopics?: boolean;
+  isDeleted?: boolean;
 }
 
 
@@ -470,16 +505,18 @@ interface BriefUser {
   isGuest?: boolean;  // = !isAuthenticated
   isEmailUnknown?: boolean;
   avatarUrl?: string;
+  isMissing?: boolean;
 }
 
 
 interface CompleteUser {
   id: any;  // TODO change to number, and User.userId too
-  createdAtEpoch: number;
+  createdAtEpoch: number;  // change to millis
   username: string;
   fullName: string;
   email: string;
   emailForEveryNewPost: boolean;
+  about?: string;
   country: string;
   url: string;
   avatarUrl?: string;
@@ -487,11 +524,11 @@ interface CompleteUser {
   isAdmin: boolean;
   isModerator: boolean;
   isApproved: boolean;
-  approvedAtEpoch: number;
+  approvedAtEpoch: number;  // change to millis
   approvedById: number;
   approvedByName: string;
   approvedByUsername: string;
-  suspendedAtEpoch?: number;
+  suspendedAtEpoch?: number;  // change to millis
   suspendedTillEpoch?: number;
   suspendedById?: number;
   suspendedByUsername?: string;
@@ -516,17 +553,17 @@ interface UsersHere {
 interface Invite {
   invitedEmailAddress: string;
   invitedById: number;
-  createdAtEpoch: number;
-  acceptedAtEpoch?: number;
-  invalidatedAtEpoch?: number;
-  deletedAtEpoch?: number;
+  createdAtEpoch: number;  // change to millis
+  acceptedAtEpoch?: number;  // change to millis
+  invalidatedAtEpoch?: number;  // change to millis
+  deletedAtEpoch?: number;  // change to millis
   deletedById?: number;
   userId?: number;
   // Later:
   /*
   userFullName?: string;
   userUsername?: string;
-  userLastSeenAtEpoch?: number;
+  userLastSeenAtEpoch?: number;  // change to millis
   userNumTopicsViewed?: number;
   userNumPostsRead?: number;
   userReadTime?: number;
@@ -558,6 +595,36 @@ interface Block {
 }
 
 
+interface SearchQuery {
+  rawQuery: string;
+  tags: string[];
+  notTags: string[];
+  categorySlugs: string[];
+}
+
+
+interface SearchResults {
+  thisIsAll: boolean;
+  pagesAndHits: PageAndHits[];
+}
+
+
+interface PageAndHits {
+  pageId: PageId;
+  pageTitle: string;
+  hits: SearchHit[];
+}
+
+
+interface SearchHit {
+  postId: PostId;
+  postNr: PostNr;
+  approvedRevisionNr: number;
+  approvedTextWithHighligtsHtml: string[];
+  currentRevisionNr: number;
+}
+
+
 /**
  * Describes how to update parts of the store. Can be e.g. a new chat message and the author.
  */
@@ -565,6 +632,9 @@ interface StorePatch {
   // Specified by the server, so old messages (that arive after the browser has been upgraded)
   // can be discarded.
   appVersion?: string;
+
+  categories?: Category[];
+
   pageVersionsByPageId?: { [pageId: string]: PageVersion };
   postsByPageId?: { [pageId: string]: Post[] };
   // rename to postAuthorsBrief? So one sees they can be ignored if the posts are
@@ -591,13 +661,27 @@ enum ContentLicense {
 }
 
 interface Settings {
+  // Login
   userMustBeAuthenticated: boolean;
   userMustBeApproved: boolean;
+  inviteOnly: boolean;
+  allowSignup: boolean;
+  allowLocalSignup: boolean;
   allowGuestLogin: boolean;
 
+  // Moderation
   numFirstPostsToAllow: number;
   numFirstPostsToApprove: number;
   numFirstPostsToReview: number;
+
+  // Spam
+  numFlagsToHidePost: number;
+  cooldownMinutesAfterFlaggedHidden: number;
+  numFlagsToBlockNewUser: number;
+  numFlaggersToBlockNewUser: number;
+  notifyModsIfUserBlocked: boolean;
+  regularMemberFlagWeight: number;
+  coreMemberFlagWeight: number;
 
   showForumCategories: boolean;
   horizontalComments: boolean;
@@ -649,6 +733,14 @@ interface SASite {
   name: string;
   canonicalHostname: string;
   createdAtMs: number;
+}
+
+
+interface Rect {
+  top: number;
+  left: number;
+  right: number;
+  bottom: number;
 }
 
 // vim: et ts=2 sw=2 tw=0 fo=r list

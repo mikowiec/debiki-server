@@ -11,9 +11,16 @@
 // Columns
 //==============================
 
-$watchbarWidth = 230px  // dupl value, in css too [7GYK42] and in chars [4YK0F2]
+$watchbarWidth = 230px  // dupl value, in js pixels & chars  [7GYK42] & [4YK0F2]
 $sidebarZIndex = 1010
+$contextbarWidth = 25vw; // = win width 1/4, and 4 is used on the next line. Dupl in js [5RK9W2]
+$contextbarMinWidth = 270px; // has effect when window width < 270 * 4 = 1080. Dupl in JS [4FK0ZD]
 
+// The maximum window width for which the context bar's width is its min width.
+$contextbarHasMinWidthMaxWinWidth = $contextbarMinWidth * 4;
+
+// The page column has its own scrollbar, and the watchbar and contextbar too, so the window
+// doesn't need any scrollbar. (Some js code knows about this [6GKF0WZ])
 body
   overflow: hidden;
 
@@ -25,7 +32,9 @@ body
   position: fixed;
   // Move the contents a bit to the left/right if sidebars open...
   left: $watchbarWidth;
-  right: 25vw;
+  right: $contextbarWidth;
+  @media (max-width: $contextbarHasMinWidthMaxWinWidth)
+    right: $contextbarMinWidth;
   &.dw-fixed-topbar-wrap
     bottom: auto;
 html.esSidebarsOverlayPage
@@ -57,7 +66,8 @@ html.esSidebarsOverlayPage
   top: 0;
   right: 0;
   bottom: 0;
-  width: 25vw;
+  width: $contextbarWidth;
+  min-width: $contextbarMinWidth;
   z-index: $sidebarZIndex;
 html.esSidebarsOverlayPage
   #esThisbarColumn
@@ -107,7 +117,7 @@ html:not(.es-watchbar-open)
 #esPageColumn
   .container
     width: 100%;
-    max-width: 1100px;
+    max-width: 1150px;
 
 #topbar > .container,
 #dwPosts > .container,
@@ -117,12 +127,15 @@ html:not(.es-watchbar-open)
 #dwPosts > div > .esTopbarWrap > .container  // try to remove
   padding-left: 20px;
   padding-right: 20px;
-  @media (max-width: 700px)
+  @media (max-width: 850px)
     padding-left: 15px;
     padding-right: 15px;
-  @media (max-width: 500px)
-    padding-left: 10px;
-    padding-right: 10px;
+  @media (max-width: 700px)
+    padding-left: 11px;
+    padding-right: 11px;
+  @media (max-width: 600px)
+    padding-left: 9px;
+    padding-right: 9px;
 
 html.es-watchbar-open:not(.esSidebarsOverlayPage)
   #topbar > .container,

@@ -20,7 +20,6 @@ package debiki.dao
 import com.debiki.core._
 import com.debiki.core.Prelude._
 import debiki.ReactJson
-import io.efdi.server.Who
 import io.efdi.server.http._
 import io.efdi.server.notf.NotificationGenerator
 import io.efdi.server.pubsub.StorePatchMessage
@@ -88,8 +87,12 @@ trait TagsDao {
       val tagsToAdd = tags -- oldTags
       val tagsToRemove = oldTags -- tags
 
+      COULD_OPTIMIZE // return immediately if tagsToAdd.isEmpty and tagsToRemove.isEmpty.
+      // (so won't reindex post)
+
       transaction.addTagsToPost(tagsToAdd, postId, isPage = post.isOrigPost)
       transaction.removeTagsFromPost(tagsToRemove, postId)
+      transaction.indexPostsSoon(post)
       transaction.updatePageMeta(pageMeta.copyWithNewVersion, oldMeta = pageMeta,
           markSectionPageStale = false)
 
@@ -101,7 +104,7 @@ trait TagsDao {
 
     refreshPageInMemCache(post.pageId)
 
-    val storePatch = ReactJson.makeStorePatch(post, postAuthor, this)
+    val storePatch = ReactJson.makeStorePatch(post, postAuthor, this, showHidden = true)
     pubSub.publish(
       StorePatchMessage(siteId, pageId, storePatch, notifications), byId = postAuthor.id)
     storePatch

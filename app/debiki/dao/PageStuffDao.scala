@@ -21,30 +21,33 @@ import com.debiki.core._
 import com.debiki.core.Prelude._
 import com.debiki.core.PageParts.{TitleNr, BodyNr}
 import debiki._
+import scala.collection.immutable
 import scala.collection.mutable
-
 import scala.collection.mutable.ArrayBuffer
 
 
-/** Page stuff, e.g. title, body excerpt (for pinned topics), author name.
-  * We might not load all stuff inside a transaction, so sometimes some data might
-  * suddenly have vanished — that's why e.g. the author is an Option[User].
+/** Page stuff, e.g. title, body excerpt (for pinned topics), user ids.
   */
 case class PageStuff(
   pageId: PageId,
   pageRole: PageRole,
   title: String,
-  bodyExcerptIfPinned: Option[String],
-  author: Option[User],
-  // author* below are deprecated.
+  bodyExcerpt: Option[String],
+  bodyImageUrls: immutable.Seq[String],
+  popularRepliesImageUrls: immutable.Seq[String],
   authorUserId: UserId,
-  authorUsername: Option[String],
-  authorFullName: Option[String],
-  authorAvatarUrl: Option[String],
-  lastReplyer: Option[User],
-  frequentPosters: Seq[User])(val pageMeta: PageMeta) extends PageTitleRole {
+  lastReplyerId: Option[UserId],
+  frequentPosterIds: Seq[UserId])(val pageMeta: PageMeta) extends PageTitleRole {
+
   def role = pageRole
+
   def categoryId = pageMeta.categoryId
+
+  def userIds: immutable.Seq[UserId] = {
+    var ids = frequentPosterIds.toVector :+ authorUserId
+    if (lastReplyerId.isDefined) ids :+= lastReplyerId.get
+    ids
+  }
 }
 
 
@@ -52,7 +55,12 @@ case class PageStuff(
 trait PageStuffDao {
   self: SiteDao =>
 
+  // The whole excerpt is shown immediately; nothing happens on click.
   val ExcerptLength = 250
+
+  // Most text initially hidden, only first line shown. On click, everything shown — so
+  // include fairly many chars.
+  val StartLength = 250
 
   val logger = play.api.Logger
 
@@ -61,58 +69,50 @@ trait PageStuffDao {
   }
 
 
-  def loadPageStuffAsList(pageIds: Iterable[PageId]): Seq[Option[PageStuff]] = {
-    val stuffByPageId = loadPageStuff(pageIds)
-    pageIds.toSeq.map(stuffByPageId.get)
-  }
-
-
-  def loadPageStuff(pageIds: Iterable[PageId]): Map[PageId, PageStuff] = {
-    var summariesById = Map[PageId, PageStuff]()
+  def getPageStuffById(pageIds: Iterable[PageId]): Map[PageId, PageStuff] = {
+    var pageStuffById = Map[PageId, PageStuff]()
     val idsNotCached = ArrayBuffer[PageId]()
 
-    // Look up summaries in cache.
+    // Look up in cache.
     for (pageId <- pageIds) {
-      val anySummary = memCache.lookup[PageStuff](cacheKey(pageId))
-      anySummary match {
-        case Some(summary) => summariesById += pageId -> summary
+      val anyStuff = memCache.lookup[PageStuff](cacheKey(pageId))
+      anyStuff match {
+        case Some(stuff) => pageStuffById += pageId -> stuff
         case None => idsNotCached.append(pageId)
       }
     }
 
-    // Ask the database for any remaining summaries.
-    val reaminingSummaries = if (idsNotCached.isEmpty) Nil else {
+    // Ask the database for any remaining stuff.
+    val reaminingStuff = if (idsNotCached.isEmpty) Nil else {
       readOnlyTransaction { transaction =>
-        loadPageStuffImpl(idsNotCached, transaction)
+        loadPageStuffById(idsNotCached, transaction)
       }
     }
     val siteCacheVersion = memCache.siteCacheVersionNow()
-    for ((pageId, summary) <- reaminingSummaries) {
-      summariesById += pageId -> summary
-      memCache.put(cacheKey(pageId), MemCacheItem(summary, siteCacheVersion))
+    for ((pageId, stuff) <- reaminingStuff) {
+      pageStuffById += pageId -> stuff
+      memCache.put(cacheKey(pageId), MemCacheItem(stuff, siteCacheVersion))
     }
 
-    summariesById
+    pageStuffById
   }
 
 
-  def loadPageStuffImpl(pageIds: Iterable[PageId], transaction: SiteTransaction)
+  def loadPageStuffById(pageIds: Iterable[PageId], transaction: SiteTransaction)
         : Map[PageId, PageStuff] = {
     if (pageIds.isEmpty)
       return Map.empty
     var stuffById = Map[PageId, PageStuff]()
     val pageMetasById = transaction.loadPageMetasAsMap(pageIds)
 
-    // Load titles for all pages, and bodies for pinned topics
-    // (because in forum topic lists, we show excerpts of pinned topics).
+    // Load titles and bodies for all pages. (Because in forum topic lists, we show excerpts
+    // of pinned topics, and the start of other topics.)
     val titlesAndBodies = transaction.loadPosts(pageIds flatMap { pageId =>
-      var pagePostIds = Seq(PagePostNr(pageId, TitleNr))
-      val pageMeta = pageMetasById.get(pageId)
-      if (pageMeta.exists(_.isPinned)) {
-        pagePostIds :+= PagePostNr(pageId, BodyNr)
-      }
-      pagePostIds
+      Seq(PagePostNr(pageId, TitleNr), PagePostNr(pageId, BodyNr))
     })
+
+    val popularPosts: Map[PageId, immutable.Seq[Post]] =
+      transaction.loadPopularPostsByPage(pageIds, limitPerPage = 10)
 
     val userIdsToLoad = {
       val pageMetas = pageMetasById.values
@@ -132,33 +132,29 @@ trait PageStuffDao {
       val anyBody = titlesAndBodies.find(post => post.pageId == pageId && post.nr == BodyNr)
       val anyTitle = titlesAndBodies.find(post => post.pageId == pageId && post.nr == TitleNr)
       val anyAuthor = usersById.get(pageMeta.authorId)
-
-      // The text in the first paragraph, but at most ExcerptLength chars.
-      // For pinned topics only — the excerpt is only shown in forum topic lists for pinned topics.
-      var anyExcerpt: Option[String] = None
-      if (pageMeta.isPinned) {
-        anyExcerpt = anyBody.flatMap(_.approvedHtmlSanitized match {
-          case None => None
-          case Some(html) =>
-            val excerpt = ReactJson.htmlToExcerpt(html, ExcerptLength)
-            Some(excerpt)
-        })
+      val popularPostsBestFirst = popularPosts.getOrElse(pageId, Nil)
+      val popularImageUrls: immutable.Seq[String] = popularPostsBestFirst flatMap { post =>
+        post.approvedHtmlSanitized.flatMap(ReactJson.findImageUrls(_).headOption) take 5
       }
+      // For pinned topics: The excerpt is only shown in forum topic lists for pinned topics,
+      // and should be the first paragraph only.
+      // Other topics: The excerpt is shown on the same line as the topic title, as much as fits.
+      // [7PKY2X0]
+      val anyExcerpt: Option[PostExcerpt] = anyBody.flatMap(_.approvedHtmlSanitized map { html =>
+        val length = pageMeta.isPinned ? ExcerptLength | StartLength
+        ReactJson.htmlToExcerpt(html, length, firstParagraphOnly = pageMeta.isPinned)
+      })
 
       val summary = PageStuff(
         pageId,
         pageMeta.pageRole,
         title = anyTitle.flatMap(_.approvedSource) getOrElse "(No title)",
-        bodyExcerptIfPinned = anyExcerpt,
-        author = anyAuthor,
+        bodyExcerpt = anyExcerpt.map(_.text),
+        bodyImageUrls = anyExcerpt.map(_.firstImageUrls).getOrElse(Vector.empty),
+        popularRepliesImageUrls = popularImageUrls,
         authorUserId = pageMeta.authorId,
-        authorUsername = anyAuthor.flatMap(_.anyUsername),
-        authorFullName = anyAuthor.flatMap(_.anyName),
-        // When listing pages, we show many users: creator, last reply, etc. and many pages,
-        // so we'll use the tiny avatar image. Should I rename to tinyAuthorAvatarUrl?
-        authorAvatarUrl = anyAuthor.flatMap(_.tinyAvatar.map(_.url)),
-        lastReplyer = pageMeta.lastReplyById.flatMap(usersById.get),
-        frequentPosters = pageMeta.frequentPosterIds.flatMap(usersById.get))(pageMeta)
+        lastReplyerId = pageMeta.lastReplyById,
+        frequentPosterIds = pageMeta.frequentPosterIds)(pageMeta)
 
       stuffById += pageMeta.pageId -> summary
     }

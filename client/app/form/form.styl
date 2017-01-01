@@ -1,4 +1,11 @@
 
+html
+  &:not(.dw-react-started) form.ShowIfNotLoggedIn,
+  &.dw-is-authenticated form.ShowIfNotLoggedIn
+    display: none;
+  &:not(.dw-is-authenticated) form.ShowIfLoggedIn
+    display: none;
+
 .dw-p-bd form,
 .preview-area form
   margin: 13px auto;
@@ -30,6 +37,9 @@
     &[disabled]
       background-color: hsl(0, 0%, 63%) !important;
 
+
+form .FormThanks
+  display: none;
 
 .esFormThanks
   text-align: center;

@@ -1,6 +1,7 @@
 /// <reference path="../../../modules/definitely-typed/lodash/lodash.d.ts"/>
 
 import _ = require('lodash');
+import progressReporter = require('./wdio-progress-reporter');
 import settings = require('./utils/settings');
 import server = require('./utils/server');
 import addCommandsToBrowser = require('./utils/commands');
@@ -69,6 +70,9 @@ var api = { config: {
   // with "/", the base url gets prepended.
   baseUrl: settings.mainSiteOrigin,
 
+  // Supposedly aborts if these many tests fail, but ... has never done that.
+  bail: settings.bail || 3,
+
   // Default timeout for all waitForXXX commands.
   waitforTimeout: settings.waitforTimeout || 10000,
 
@@ -114,7 +118,8 @@ var api = { config: {
   // Test reporter for stdout.
   // The following are supported: dot (default), spec and xunit
   // see also: http://webdriver.io/guide/testrunner/reporters.html
-  reporters: ['dot'],
+  //reporters: ['dot'],
+  reporters: [progressReporter],
 
   // Options to be passed to Mocha.
   // See the full list at http://mochajs.org/

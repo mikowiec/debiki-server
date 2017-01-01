@@ -9,25 +9,95 @@ var logMessage = logMessageModule.logMessage;
 var logWarning = logMessageModule.logWarning;
 
 
+function count(elems): number {
+  return elems && elems.value ? elems.value.length : 0;
+}
+
+
+function byBrowser(result) {  // dupl code [4WKET0] move all to pages-for?
+  if (!_.isObject(result) || _.isArray(result) || result.value) {
+    // This is the results from one single browser. Create a dummy by-browser
+    // result map.
+    return { onlyOneBrowser: result };
+  }
+  else {
+    // This is an object like:
+    //    { browserA: { ..., value: ... }, browserB: { ..., value: ... } }
+    // or like:
+    //    { browserA: "text-found", browserB: "other-text-found" }
+    // That's what we want.
+    return result;
+  }
+}
+
+function isTheOnly(browserName) {  // dupl code [3PFKD8GU0]
+  return browserName === 'onlyOneBrowser';
+}
+
+function browserNamePrefix(browserName): string { // dupl code [4GK0D8G2]
+  if (isTheOnly(browserName)) return '';
+  return browserName + ': ';
+}
+
+function allBrowserValues(result) {
+  var resultByBrowser = byBrowser(result);
+  return _.values(resultByBrowser);
+}
+
+function isResponseOk(response): boolean {
+  // Previously, .status === 0' worked, but now .status instead a function that seems to
+  // return the object itself (weird). Use '._status' instead + check '.state' too  :-P
+  return response._status === 0 && response.state === "success";
+}
+
+
 function addCommandsToBrowser(browser) {
 
   browser.addCommand('waitUntilLoadingOverlayGone', function() {
-    browser.waitUntil(function () {
-      return !browser.isVisible('#theLoadingOverlay');
-    });
+    browser.waitUntilGone('#theLoadingOverlay');
   });
 
   browser.addCommand('waitUntilModalGone', function() {
     browser.waitUntil(function () {
-      return !browser.isVisible('.modal-backdrop');
+      // Check for the modal backdrop (it makes the stuff not in the dialog darker).
+      var resultsByBrowser = browser.isVisible('.modal-backdrop');
+      var values = allBrowserValues(resultsByBrowser);
+      var anyVisible = _.some(values, x => x);
+      if (anyVisible)
+        return false;
+      // Check for the block containing the modal itself.
+      resultsByBrowser = browser.isVisible('.fade.modal');
+      values = allBrowserValues(resultsByBrowser);
+      anyVisible = _.some(values, x => x);
+      return !anyVisible;
     });
   });
 
+  browser.addCommand('waitUntilGone', function(what) {
+    browser.waitUntil(function () {
+      var resultsByBrowser = browser.isVisible(what);
+      var values = allBrowserValues(resultsByBrowser);
+      return _.every(values, x => !x );
+    });
+  });
+
+  browser.addCommand('refreshUntilGone', function(what) {
+    while (true) {
+      let resultsByBrowser = browser.isVisible(what);
+      let isVisibleValues = allBrowserValues(resultsByBrowser);
+      let goneEverywhere = !_.some(isVisibleValues);
+      if (goneEverywhere) break;
+      browser.refresh();
+      browser.pause(250);
+    }
+  });
 
   browser.addCommand('waitForAtLeast', function(num, selector) {
     browser.waitUntil(function () {
-      var elems = browser.elements(selector);
-      return elems.value.length >= num;
+      var elemsList = allBrowserValues(browser.elements(selector));
+      return _.every(elemsList, (elems) => {
+        return count(elems) >= num;
+      });
     });
   });
 
@@ -35,8 +105,21 @@ function addCommandsToBrowser(browser) {
   browser.addCommand('waitForAtMost', function(num, selector) {
     browser.waitUntil(function () {
       var elems = browser.elements(selector);
-      return elems.value.length <= num;
+      return count(elems) <= num;
     });
+  });
+
+
+  browser.addCommand('assertExactly', function(num, selector) {
+    let errorString = '';
+    let resultsByBrowser = byBrowser(browser.elements(selector));
+    _.forOwn(resultsByBrowser, (result, browserName) => {
+      if (result.value.length !== num) {
+        errorString +=browserNamePrefix(browserName) + "Selector '" + selector + "' matches " +
+          result.value.length + " elems, but there should be exactly " + num + "\n";
+      }
+    });
+    assert.ok(!errorString, errorString);
   });
 
 
@@ -48,16 +131,41 @@ function addCommandsToBrowser(browser) {
   });
 
 
-  browser.addCommand('waitAndClick', function(selector) {
-    browser.waitForVisible(selector);
-    browser.waitForEnabled(selector);
-    browser.waitUntilLoadingOverlayGone();
-    if (!selector.startsWith('#')) {
-      var elems = browser.elements(selector);
-      assert.equal(elems.value.length, 1, "Too many elems to click: " + elems.value.length +
-        " elems matches selector: " + selector + " [EsE5JKP82]");
+  browser.addCommand('waitAndSetValueForId', function(id, value) {
+    browser.waitAndSetValue('#' + id, value);
+  });
+
+
+  browser.addCommand('waitForThenClickText', function(selector, regex) {
+    var elemId = browser.waitAndGetElemIdWithText(selector, regex);
+    browser.elementIdClick(elemId);
+  });
+
+
+  browser.addCommand('waitUntilTextMatches', function(selector, regex) {
+    browser.waitAndGetElemIdWithText(selector, regex);
+  });
+
+
+  browser.addCommand('waitAndGetElemIdWithText', function(selector, regex) {
+    if (_.isString(regex)) {
+      regex = new RegExp(regex);
     }
-    browser.click(selector);
+    var elemIdFound;
+    browser.waitUntil(() => {
+      var elems = browser.elements(selector).value;
+      for (var i = 0; i < elems.length; ++i) {
+        var elem = elems[i];
+        var text = browser.elementIdText(elem.ELEMENT).value;
+        var matches = regex.test(text);
+        if (matches) {
+          elemIdFound = elem.ELEMENT;
+          return true;
+        }
+      }
+      return false;
+    });
+    return elemIdFound;
   });
 
 
@@ -76,8 +184,20 @@ function addCommandsToBrowser(browser) {
 
 
   browser.addCommand('go', function(url) {
+    if (url[0] === '/') {
+      // Local url, need to add origin.
+      url = browser.origin() + url;
+    }
     logMessage("Go: " + url);
     browser.url(url);
+  });
+
+
+  browser.addCommand('goAndWaitForNewUrl', function(url) {
+    logMessage("Go: " + url);
+    browser.rememberCurrentUrl();
+    browser.url(url);
+    browser.waitForNewUrl();
   });
 
 
@@ -128,6 +248,7 @@ function addCommandsToBrowser(browser) {
 
 
   browser.addCommand('waitAndAssertVisibleTextMatches', function(selector, regex) {
+    if (_.isString(regex)) regex = new RegExp(regex);
     var text = browser.waitAndGetVisibleText(selector);
     assert(regex.test(text), "'Elem selected by " + selector + "' didn't match " + regex.toString() +
       ", actual text: '" + text + "'");
@@ -135,21 +256,37 @@ function addCommandsToBrowser(browser) {
 
 
   browser.addCommand('assertTextMatches', function(selector, regex, regex2) {
+    assertOneOrAnyTextMatches(false, selector, regex, regex2);
+  });
+
+
+  browser.addCommand('assertAnyTextMatches', function(selector, regex, regex2) {
+    assertOneOrAnyTextMatches(true, selector, regex, regex2);
+  });
+
+
+  function assertOneOrAnyTextMatches(many, selector, regex, regex2) {
     if (_.isString(regex)) {
       regex = new RegExp(regex);
     }
     if (_.isString(regex2)) {
       regex2 = new RegExp(regex2);
     }
-    var text = browser.getText(selector);
-    assert(regex.test(text), "Elem selected by '" + selector + "' didn't match " + regex.toString() +
-      ", actual text: '" + text + "'");
-    // COULD use 'arguments' & a loop instead
-    if (regex2) {
-      assert(regex2.test(text), "Elem selected by '" + selector + "' didn't match " +
-          regex2.toString() + ", actual text: '" + text + "'");
-    }
-  });
+    var textByBrowserName = byBrowser(browser.getText(selector));
+    _.forOwn(textByBrowserName, function(text, browserName) {
+      var whichBrowser = isTheOnly(browserName) ? '' : ", browser: " + browserName;
+      if (!many) {
+        assert(!_.isArray(text), "Broken e2e test. Select only 1 elem please [EsE4KF0W2]");
+      }
+      assert(regex.test(text), "Elem selected by '" + selector + "' didn't match " +
+          regex.toString() + ", actual text: '" + text + whichBrowser);
+      // COULD use 'arguments' & a loop instead
+      if (regex2) {
+        assert(regex2.test(text), "Elem selected by '" + selector + "' didn't match " +
+          regex2.toString() + ", actual text: '" + text + whichBrowser);
+      }
+    });
+  }
 
 
   // n starts on 1 not 0.
@@ -165,7 +302,7 @@ function addCommandsToBrowser(browser) {
     var items = browser.elements(selector).value;
     assert(items.length >= n, "Only " + items.length + " elems found, there's no elem no " + n);
     var response = browser.elementIdText(items[n - 1].ELEMENT);
-    assert(response.status === 0, "Bad response.status: " + response.status +
+    assert(isResponseOk(response), "Bad response._status: " + response._status +
         ", state: " + response.state);
     var text = response.value;
     assert(regex.test(text), "Elem " + n + " selected by '" + selector + "' doesn't match " +
@@ -176,6 +313,38 @@ function addCommandsToBrowser(browser) {
           regex2.toString() + ", actual text: '" + text + "'");
     }
   });
+
+
+  browser.addCommand('assertNoTextMatches', function(selector, regex) {
+    assertAnyOrNoneMatches(selector, regex, false);
+  });
+
+
+  function assertAnyOrNoneMatches(selector: string, regex, shallMatch: boolean) {
+    if (_.isString(regex)) {
+      regex = new RegExp(regex);
+    }
+    // Surprisingly, browser.elements(..) blocks forever, if `selector` is absent. So:
+    if (!browser.isVisible(selector)) {
+      if (!shallMatch)
+        return;
+      assert(false, "No visible elems matches " + selector);
+    }
+    var elems = browser.elements(selector).value;
+    assert(!shallMatch || elems.length, "No elems found matching " + selector);
+    for (var i = 0; i < elems.length; ++i) {
+      var elem = elems[i];
+      var text = browser.elementIdText(elem.ELEMENT).value;
+      var matches = regex.test(text);
+      if (matches) {
+        if (shallMatch)
+          return;
+        assert(false, "Elem found matching '" + selector + "' and regex: " + regex.toString());
+      }
+    }
+    assert(!shallMatch, "No elem selected by '" + selector + "' matches regex: " +
+        regex.toString());
+  }
 
 
   browser.addCommand('assertPageTitleMatches', function(regex) {
@@ -200,12 +369,22 @@ function addCommandsToBrowser(browser) {
   browser.addCommand('assertNotFoundError', function() {
     var source = browser.getSource();
     assert(/404 Not Found[\s\S]+EsE404/.test(source));
-    assert(source.length < 200); // if the page is larger, it's probably the wrong page
+    // If the page is larger than this, it's probably the wrong page. (There're some
+    // <html><head><body><pre> tags too, otherwise 400 wold have been too much.)
+    assert(source.length < 400);
   });
 
 
   browser.addCommand('disableRateLimits', function() {
     browser.setCookie({ name: 'esCoE2eTestPassword', value: settings.e2eTestPassword });
+  });
+
+
+  browser.addCommand('perhapsDebugBefore', function(selector, regex) {
+    if (settings.debugBefore) {
+      console.log("*** Paused. Now you can connect a debugger. ***");
+      browser.debug();
+    }
   });
 
 

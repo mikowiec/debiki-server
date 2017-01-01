@@ -32,13 +32,13 @@ case class ReviewStuff(
   id: ReviewTaskId,
   reasons: immutable.Seq[ReviewReason],
   createdAt: ju.Date,
-  causedBy: User,
+  createdBy: User,
   moreReasonsAt: Option[ju.Date],
   completedAt: Option[ju.Date],
   completedBy: Option[User],
   invalidatedAt: Option[ju.Date],
   resolution: Option[ReviewTaskResolution],
-  user: Option[User],
+  maybeBadUser: User,
   pageId: Option[PageId],
   pageTitle: Option[String],
   post: Option[Post]) {
@@ -76,12 +76,19 @@ trait ReviewsDao {
         action match {
           case ReviewAction.Accept =>
             if (post.isCurrentVersionApproved) {
-              // The System user has apparently approved the post already. We're reviewing
-              // the post, after it's been shown already.
+              // The System user has apparently approved the post already.
+              // However, it might have been hidden a tiny bit later, after some  external services
+              // said it's spam. Now, though, we know it's apparently not spam, so show it.
+              if (post.isBodyHidden) {
+                // SPAM RACE COULD unhide only if rev nr that got hidden <=
+                // rev that was reviewed. [6GKC3U]
+                changePostStatusImpl(postNr = post.nr, pageId = post.pageId,
+                    PostStatusAction.UnhidePost, userId = completedById, transaction)
+              }
             }
             else {
               if (task.isForBothTitleAndBody) {
-                // This is for a new page. Approve the title here, and the body in the `if` below.
+                // This is for a new page. Approve the *title* here, and the *body* just below.
                 dieIf(!task.postNr.contains(PageParts.BodyNr), "EsE5TK0I2")
                 approvePostImpl(post.pageId, PageParts.TitleNr, approverId = completedById,
                   transaction)
@@ -104,26 +111,66 @@ trait ReviewsDao {
   }
 
 
-  /** If we have approved all the required first review tasks caused by userId, then
+  /** If we have approved all the required first post review tasks caused by userId, then
     * this method auto-approves all remaining first review tasks — because now we trust
     * the user that much.
     */
   private def perhapsCascadeApproval(userId: UserId)(transaction: SiteTransaction) {
-    var pageIdsToRefresh = Set[PageId]()
+    var pageIdsToRefresh = mutable.Set[PageId]()
     val settings = loadWholeSiteSettings(transaction)
     val numFirstToAllow = math.min(MaxNumFirstPosts, settings.numFirstPostsToAllow)
     val numFirstToApprove = math.min(MaxNumFirstPosts, settings.numFirstPostsToApprove)
     if (numFirstToAllow > 0 && numFirstToApprove > 0) {
-      val tasks = transaction.loadReviewTaskCausedBy(userId,
-        limit = MaxNumFirstPosts, OrderBy.OldestFirst)
-      val numApproved = tasks.count(_.resolution.exists(_.isFine))
+      // Load some more review tasks than just MaxNumFirstPosts, in case the user has
+      // somehow triggered even more review tasks, e.g. because getting flagged.
+      // SECURITY (minor) if other users flag userId's posts 9999 times, we won't load any
+      // approved posts here, and the approval won't be cascaded.
+      val someMore = 15
+      // COULD load tasks for posts, and tasks for approved posts, and tasks resolved as harmful,
+      // in three separate queries? So won't risk 9999 of one type —> finds no other types.
+      val tasks = transaction.loadReviewTasksAboutUser(userId,
+        limit = MaxNumFirstPosts + someMore, OrderBy.OldestFirst)
+
+      // Use a set, because there might be many review tasks for the same post, if different
+      // people flag the same post.
+      var postIdsApproved = Set[UniquePostId]()
+      var numHarmful = 0
+      tasks foreach { task =>
+        if (task.resolution.exists(_.isFine)) {
+          if (task.postId.isDefined) {
+            postIdsApproved += task.postId getOrDie "EdE7KW02Y"
+          }
+          else {
+            // What's this? Perhaps the user editing his/her bio and the bio getting
+            // reviewed (not yet implemented though). Ignore.
+          }
+        }
+        else if (task.resolution.exists(_.isHarmful)) {
+          numHarmful += 1
+        }
+      }
+
+      val numApproved = postIdsApproved.size
+      if (numHarmful > 0)
+        return
+
       val shallApproveRemainingFirstPosts = numApproved >= numFirstToApprove
       if (shallApproveRemainingFirstPosts) {
         val pendingTasks = tasks.filter(!_.doneOrGone)
-        val postIdsToApprove = pendingTasks.flatMap(_.postId)
+        val titlesToApprove = mutable.HashSet[PageId]()
+        val postIdsToApprove = pendingTasks flatMap { task =>
+          if (task.postNr.contains(PageParts.BodyNr)) {
+            titlesToApprove += task.pageId getOrDie "EdE2WK0L6"
+          }
+          task.postId
+        }
         val postsToApprove = transaction.loadPostsByUniqueId(postIdsToApprove).values
-        pageIdsToRefresh ++= postsToApprove.map(
-          autoApprovePendingEarlyPost(_, transaction))
+        val titlePostsToApprove = titlesToApprove.flatMap(transaction.loadTitle)
+        val allPostsToApprove = postsToApprove ++ titlePostsToApprove
+        for ((pageId, posts) <- allPostsToApprove.groupBy(_.pageId)) {
+          pageIdsToRefresh += pageId
+          autoApprovePendingEarlyPosts(pageId, posts)(transaction)
+        }
       }
     }
     refreshPagesInAnyCache(pageIdsToRefresh)
@@ -145,9 +192,9 @@ trait ReviewsDao {
 
     val userIds = mutable.Set[UserId]()
     reviewTasks foreach { task =>
-      userIds.add(task.causedById)
+      userIds.add(task.createdById)
       task.completedById.foreach(userIds.add)
-      task.userId.foreach(userIds.add)
+      userIds.add(task.maybeBadUserId)
     }
     postsById.values foreach { post =>
       userIds.add(post.createdById)
@@ -168,14 +215,14 @@ trait ReviewsDao {
         ReviewStuff(
           id = task.id,
           reasons = task.reasons,
-          causedBy = usersById.get(task.causedById) getOrDie "EsE4GUP2",
+          createdBy = usersById.get(task.createdById) getOrDie "EsE4GUP2",
           createdAt = task.createdAt,
           moreReasonsAt = task.moreReasonsAt,
           completedAt = task.completedAt,
           completedBy = task.completedById.flatMap(usersById.get),
           invalidatedAt = task.invalidatedAt,
           resolution = task.resolution,
-          user = task.userId.flatMap(usersById.get),
+          maybeBadUser = usersById.get(task.maybeBadUserId) getOrDie "EdE2KU8B",
           pageId = task.pageId,
           pageTitle = anyPageTitle,
           post = anyPost))

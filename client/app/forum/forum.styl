@@ -17,6 +17,14 @@
 
 
 $forumNavBtnGroupLeft = 8px;
+$isWideMinWidth = 900px;
+
+// Avoid a flash of the-wrong-layout (e.g. table layout, before noticing that the screen
+// is narrow and switching to list layout).
+html.js:not(.dw-react-started)
+  .dw-topic-list,
+  .esF_TsL
+    display: none;
 
 .esForumIntro
   clearfix()
@@ -223,9 +231,10 @@ $forumNavBtnGroupLeft = 8px;
   font-style: italic;
   font-size: 14px;
 
-$tablePaddingLeft = 8px
+$tablePaddingLeftNarrow = 4px
+$tablePaddingLeftWide = 8px
 $tableFontSize = 13.4px;
-$tableTopicTitleFontSize = 15px;
+$tableTopicTitleFontSize = 15.3px;
 $tableTopicExcerptFontSize = 14px;
 $tableHeaderFontSize = 14px;
 
@@ -233,7 +242,9 @@ $tableHeaderFontSize = 14px;
 .dw-topic-list,
 .forum-table
   th
-    padding: 8px $tablePaddingLeft 8px;
+    padding: 8px $tablePaddingLeftNarrow 8px;
+    @media (min-width: $isWideMinWidth)
+      padding: 8px $tablePaddingLeftWide 8px;
     font-weight: normal;
     font-size: $tableHeaderFontSize;
     color: hsl(0, 0%, 55%);
@@ -248,6 +259,102 @@ $tableHeaderFontSize = 14px;
 html.js:not(.dw-react-started) #dw-topic-list tbody
   display: none;
 
+.s_F_CatDdInfo
+  font-weight: bold;
+  font-size: 17px;
+  margin-bottom: 26px;
+  .icon-trash:before
+    font-size: 26px;
+    color: #494949;
+    margin-right: 7px;
+    position: relative;
+    top: 2px;
+
+// Dim topics if category deleted.
+.s_F_Ts-CatDd .dw-tpc-title
+  opacity: 0.61;
+
+.s_F_Ts_T_Avs
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+
+th.dw-tpc-replies
+  padding-left: 0;
+
+/* COULD RESPONSIVE if forum table narrow
+// Smaller distance between stats columns:
+th.num
+  padding-right: 3px;
+*/
+
+td.dw-tpc-activity
+  white-space: normal !important;
+
+// Why both :link and :visited needed? With just :link, a:visited's default color is used instead.
+.esF_Ts_T_CName:link,
+.esF_Ts_T_CName:visited,
+.dw-tpc-replies,
+.dw-tpc-activity
+  color: hsl(0, 0%, 51%);
+
+.dw-tpc-title
+  padding: 13px 30px 5px 8px !important;
+
+.dw-tpc-title
+  a
+    color: black;
+  .s_F_Ts_T_Con-Para a
+    color: hsl(0, 0%, 16%);
+    font-weight: bold;
+
+.s_F_Ts_T_Con
+  line-height: 24px;
+  // some space for highlighting the link inside on hover:
+  padding-left: 6px;
+  position: relative;
+  left: -6px;
+
+.s_F_Ts_T_Con-OneLine
+  height: 31px;
+  overflow: hidden;
+  // On click, more excerpt text will be shown, by .s_F_Ts_T_Con-More just below.
+  cursor: pointer;
+
+.s_F_Ts_T_Con-More
+  // Show more excerpt, because -OneLine just above was clicked.
+  height: auto;
+  margin-bottom: 7px;
+
+.s_F_Ts_T_Con_B
+  color: hsl(0, 0%, 60%);
+  font-size: 13px;
+
+.s_F_Ts_T_Tmbs
+  max-height: 90px;
+  overflow: hidden;
+  margin-bottom: 5px;
+
+.esF_TsL_T .s_F_Ts_T_Tmbs
+  margin: 2px 0 8px; // some whitespace looks better in mobile view
+  img
+    margin: 6px 10px 7px -1px;
+
+.s_F_Ts_T_Tmbs img
+  max-width: 160px;
+  max-height: 80px;
+  margin: 6px 10px 7px -1px;
+  opacity: 0.8;
+  float: left;
+
+.s_F_Ts-Wide .s_F_Ts_T_Con_B
+  &:before
+    content: '– ';
+    margin: 0 2px 0 1px;
+
+.esF_Ts_T_CName
+  vertical-align: middle;
+  padding: 3px 2px 2px 5px !important;  // dupl 5px left padding, see (305FF220)
+
 .dw-topic-list
   width: 100%
 
@@ -260,16 +367,15 @@ html.js:not(.dw-react-started) #dw-topic-list tbody
     @media (max-width: 980px)
       &:nth-child(4)
         display: none
+      margin-left: 2px; // place them closer
     @media (max-width: 870px)
       &:nth-child(3)
         display: none
-    @media (max-width: 800px)
+    @media (max-width: 770px)
       &:nth-child(2)
         display: none
-    // Tiny screen, show only Original Poster.
-    @media (max-width: 700px)
-      &:nth-child(5)
-        display: none
+    // On even smaller screens, we don't use table layout, but instead row layout.
+    // Then there's lots of space: we can show all users again.
 
   tbody
     tr
@@ -283,16 +389,19 @@ html.js:not(.dw-react-started) #dw-topic-list tbody
 
     tr.esForum_topics_topic
       td
-        padding: 10px $tablePaddingLeft
+        padding: 10px $tablePaddingLeftNarrow
+        @media (min-width: $isWideMinWidth)
+          padding: 10px $tablePaddingLeftWide
         font-size: $tableFontSize;
         &.dw-tpc-title
           font-size: $tableTopicTitleFontSize;
+          .s_F_Ts_T_Con-Para
+            font-size: $tableTopicTitleFontSize + 1.7;
           .dw-p-excerpt
             font-size: $tableTopicExcerptFontSize;
         a
-          color: hsl(0, 0%, 13%);
-          $leftPadding = 5px;
-          padding: 3px 6px 5px $leftPadding; // makes it easier to click
+          $leftPadding = 5px;  // dupl 5px, see (305FF220)
+          padding: 3px 2px 5px $leftPadding; // makes it easier to click
           position: relative;
           left: - $leftPadding;
           &:hover
@@ -303,21 +412,57 @@ html.js:not(.dw-react-started) #dw-topic-list tbody
         &:not(.dw-tpc-title)
           white-space: nowrap;
 
+        &.dw-tpc-title
+          word-break: break-word;
+
         &.dw-tpc-title .icon-pin:before
           color: hsl(0, 0%, 63%);
-          padding-right: 19px;
+          padding-right: 20px;
           margin-left: 0;
           vertical-align: middle;
+          position: relative;
+          top: -1px;
+
+        .esF_Ts_T_CName
+          display: inline-block;
+          // Category names shouldn't be too long. Truncate if too long. Don't wrap to a new
+          // line, because then Chrome wraps happily when not needed.
+          overflow: hidden;
+          text-overflow: ellipsis;
+          min-width: 110px;
+          max-width: 280px;
+          @media (max-width: 900px)
+            max-width: 230px;
+          // However now the screen is narrow, and it now works okay to let Chrome wrap.
+          @media (max-width: 800px)
+            word-break: break-word;
+            white-space: normal;
+
+        .icon-eye-off:before
+          content: '\e824';
+          margin: 0 8px 0 1px;
+          font-size: 16px;
+          color: hsl(0, 0%, 57%);
+
+        .icon-mail:before
+          color: hsl(0, 0%, 71%);
+          position: relative;
+          left: -2px;
+          margin-right: 6px;
 
         .icon-comment-empty:before
-          font-size: 14px;
+          font-size: 15px;
           margin: 0 9px 0 0;
           color: hsl(0, 0%, 65%);
+          position: relative;
+          top: -1px;
 
         .icon-chat:before
           color: hsl(0, 0%, 70%);
           font-weight: bold;
-          margin-right: 9px;
+          margin: 0 9px 0 0;
+          padding: 0;
+          width: 17px;
 
         .icon-help-circled:before
           margin: 0 7px 0 0;
@@ -325,7 +470,7 @@ html.js:not(.dw-react-started) #dw-topic-list tbody
           font-size: 16px;
 
         .icon-sitemap:before
-          color: hsl(0,0%, 74%);
+          color: hsl(0,0%, 71%);
           margin: 0 8px 0 0;
           position: relative;
           left: -1px;
@@ -388,11 +533,8 @@ html.js:not(.dw-react-started) #dw-topic-list tbody
         &.num:not(.dw-tpc-feelings, .dw-tpc-replies)
           color: hsl(0, 0%, 53%);
 
-        &.dw-tpc-replies
-          color: hsl(0, 0%, 20%);
-
         .dw-p-excerpt
-          color: hsl(0, 0%, 44%);
+          color: hsl(0, 0%, 53%);
           margin: 1ex 20px 1ex 0;
           max-width: 650px;
           font-size: 100%;
@@ -457,15 +599,24 @@ html.js:not(.dw-react-started) #dw-topic-list tbody
 .esTopicIconHelp_intro
   margin-bottom: 8px;
 
+// Avoid flash of ISO dates in activity column (e.g. 2016-09-10 23:59:59Z)
+html.js:not(.dw-react-started) .dw-tpc-activity .dw-ago-ltr
+  visibility: hidden;
+  width: 75px;
+  display: block;
+
 
 // Categories tree
 //===========================
 
 .esForum_cats_cat-new
   animation: esFadeIn 2.5s 0s;
-  animation-timing-function: ease-out;
   animation-timing-function: ease-out-quad;
 
+.s_F_Cs_C-Dd
+  .forum-title,
+  .topic-title
+    crossGray();
 
 @keyframes esFadeIn
   from
@@ -475,6 +626,8 @@ html.js:not(.dw-react-started) #dw-topic-list tbody
     opacity: 1;
     background: hsl($uiHue, 0%, 100%);
 
+.esForum_cats_cat .forum-description
+  word-break: break-word;
 
 .forum-table
   & > tbody > tr > td:first-child
@@ -606,6 +759,95 @@ html.js:not(.dw-react-started) #dw-topic-list tbody
 .topic-list .topic-details {
   margin-bottom: 5px;
 }
+
+
+// Forum in list layout (not table)
+//------------------------
+
+$numRepliesWidth = 70px; // dupl below [3WKF04]
+$topicTitlePadding = 6px;
+$row2PaddingBottom = 7px;
+
+.esF_TsL_T
+  list-style: none;
+  margin: 0;
+  padding: (12px - $topicTitlePadding) 0 6px;
+  border-top: 1px solid hsl(0, 0%, 83%);
+
+.esF_TsL_T_Title
+  display: inline-block;
+  width: calc(100% - 70px); // $numRepliesWidth [3WKF04] doesn't work in here, why not?
+  padding-right: 15px;
+  word-break: break-word;
+  > a:first-child
+    font-size: 16px;
+    font-weight: bold;
+    color: hsl(0, 0%, 15%);
+    padding: $topicTitlePadding 0 7px;
+    display: inline-block;
+  [class^='icon-']:before
+    left: -2px;
+    position: relative;
+    margin-right: 5px;
+    opacity: 0.65;
+  .icon-pin
+    margin-right: 5px;
+  // If a pin icon is shown already, hide topic type icon. [6YK320W]
+  .icon-pin [class^=icon-]:before
+    display: none;
+
+.esF_TsL_T_NumRepls
+  display: block;
+  float: right;
+  width: $numRepliesWidth;
+  padding: $topicTitlePadding 0 0;
+  text-align: right;
+  .icon-comment-empty:before
+    position: relative;
+    top: -1px;
+    right: -1px;
+
+.esF_TsL_T
+  .dw-p-excerpt,
+  .s_F_Ts_T_Con_B
+    display: block;
+    margin: 0 0 11px;
+    color: #555;
+    a
+      margin-left: 7px;
+
+.esF_TsL_T_Row2
+  clearfix();
+  margin-top: 7px;
+
+.esF_TsL_T_Row2_When
+  float: right;
+  vertical-align: middle;
+  padding: 2px 3px 5px 5px; // top:2px aligns w category name, other sides make easier to click
+  min-width: 35px;
+  text-align: right;
+
+.esF_TsL_T_Row2_Users
+  clearfix();
+  padding-bottom: $row2PaddingBottom;
+  display: inline-block;
+  vertical-align: middle;
+  opacity: 0.8; // otherwise avatars steal attention from topic title
+  .esAvtr-tny
+    margin-right: 4px;
+
+.esF_TsL_T_Row2_Cat
+  display: inline-block;
+  margin: 0 4px 0 8px;
+  vertical-align: middle;
+  padding-bottom: $row2PaddingBottom;
+  .esF_Ts_T_CName
+    color: #222;
+
+.esF_TsL_T_Row2_Cat_Expl
+  color: hsl(0, 0%, 50%);
+  margin-right: 1px;
+  vertical-align: middle;
 
 
 // vim: fdm=indent et ts=2 sw=2 fo=r list

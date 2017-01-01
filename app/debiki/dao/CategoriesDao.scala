@@ -20,8 +20,8 @@ package debiki.dao
 import com.debiki.core._
 import com.debiki.core.Prelude._
 import debiki.DebikiHttp.throwNotFound
+import io.efdi.server.http.throwForbiddenIf
 import debiki.TextAndHtml
-import io.efdi.server.Who
 import java.{util => ju}
 import scala.collection.{immutable, mutable}
 import scala.collection.mutable.ArrayBuffer
@@ -55,7 +55,8 @@ case class CategoryToSave(
   staffOnly: Boolean,
   onlyStaffMayCreateTopics: Boolean,
   description: String,
-  anyId: Option[CategoryId] = None) { // Some() if editing
+  anyId: Option[CategoryId] = None, // Some() if editing
+  isCreatingNewForum: Boolean = false) {
 
   val aboutTopicTitle = TextAndHtml.forTitle(s"About the $name category")
   val aboutTopicBody = TextAndHtml.forBodyOrComment(description)
@@ -156,6 +157,11 @@ trait CategoriesDao {
   }
 
 
+  def listPagesByUser(userId: UserId, isStaffOrSelf: Boolean, limit: Int): Seq[PagePathAndMeta] = {
+    readOnlyTransaction(_.loadPagesByUser(userId, isStaffOrSelf = isStaffOrSelf, limit))
+  }
+
+
   /** Lists pages placed directly in one of categoryIds.
     */
   private def listPagesInCategories(categoryIds: Seq[CategoryId], pageQuery: PageQuery, limit: Int)
@@ -175,6 +181,9 @@ trait CategoriesDao {
         // whole section (e.g. the whole forum) but only the root of a sub section (e.g.
         // a category in the forum). The top root shouldn't contain any pages, but subtree roots
         // usually contain pages. )
+        // (If `restrictedOnly` is true, then most hidden topics won't be included, because
+        // they might not be placed inside restricted categories. Everything works fine
+        // anyway currently, though, see [7RIQ29]. )
         listCategoriesInTree(categoryId, includeRoot = true,
           isStaff = isStaff, restrictedOnly = restrictedOnly).map(_.id)
       }
@@ -205,6 +214,12 @@ trait CategoriesDao {
     val anyCategory = catsStuff._1.get(id)
     val defaultId = catsStuff._3
     anyCategory.map(category => (category, category.id == defaultId))
+  }
+
+
+  def loadCategoryBySlug(slug: String): Option[Category] = {
+    val catsStuff = loadBuildRememberCategoryMaps()
+    catsStuff._1.values.find(_.slug == slug)
   }
 
 
@@ -256,7 +271,7 @@ trait CategoriesDao {
     })
     // Do include even if startCategory.onlyStaffMayCreate — because category still visible.
     // COULD rename restrictedOnly to ... visibleOnly? Or add a real permissions system.
-    val isRestricted = startCategory.unlisted || startCategory.staffOnly
+    val isRestricted = startCategory.unlisted || startCategory.staffOnly || startCategory.isDeleted
     if (isRestricted && !isStaff)
       return
     if (includeRoot && (!restrictedOnly || isRestricted)) {
@@ -360,7 +375,7 @@ trait CategoriesDao {
         bodyHtmlSanitized = newCategoryData.aboutTopicBody.safeHtml,
         pinOrder = Some(ForumDao.AboutCategoryTopicPinOrder),
         pinWhere = Some(PinPageWhere.InCategory),
-        byWho, transaction)
+        byWho, spamRelReqStuff = None, transaction)
 
     if (newCategoryData.shallBeDefaultCategory) {
       setDefaultCategory(category, transaction)
@@ -370,9 +385,24 @@ trait CategoriesDao {
 
     // The forum needs to be refreshed because it has cached the category list
     // (in JSON in the cached HTML).
-    refreshPageInMemCache(category.sectionPageId)
+    if (!newCategoryData.isCreatingNewForum) {
+      refreshPageInMemCache(category.sectionPageId)
+    }
 
     (category, aboutPagePath)
+  }
+
+
+  def deleteUndeleteCategory(categoryId: CategoryId, delete: Boolean, who: Who) {
+    readWriteTransaction { transaction =>
+      throwForbiddenIf(!transaction.isAdmin(who.id), "EdEGEF239S", "Not admin")
+      val categoryBefore = transaction.loadCategory(categoryId) getOrElse {
+        throwNotFound("EdE5FK8E2", s"No category with id $categoryId")
+      }
+      val categoryAfter = categoryBefore.copy(
+        deletedAt = if (delete) Some(transaction.now.toJavaDate) else None)
+      transaction.updateCategoryMarkSectionPageStale(categoryAfter)
+    }
   }
 
 

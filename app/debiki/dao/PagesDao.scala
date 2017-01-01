@@ -23,7 +23,6 @@ import com.debiki.core.PageParts.MaxTitleLength
 import com.debiki.core.User.SystemUserId
 import debiki._
 import debiki.DebikiHttp._
-import io.efdi.server.{Who, UserAndLevels}
 import io.efdi.server.http.throwIndistinguishableNotFound
 import io.efdi.server.notf.NotificationGenerator
 import java.{util => ju}
@@ -44,13 +43,10 @@ trait PagesDao {
   self: SiteDao =>
 
 
-  def loadThePageMeta(pageId: PageId) =
-    readOnlyTransaction(_.loadThePageMeta(pageId))
-
-
   def createPage(pageRole: PageRole, pageStatus: PageStatus, anyCategoryId: Option[CategoryId],
         anyFolder: Option[String], anySlug: Option[String], titleTextAndHtml: TextAndHtml,
-        bodyTextAndHtml: TextAndHtml, showId: Boolean, byWho: Who): PagePath = {
+        bodyTextAndHtml: TextAndHtml, showId: Boolean, byWho: Who,
+        spamRelReqStuff: SpamRelReqStuff): PagePath = {
 
     if (pageRole.isSection) {
       // Should use e.g. ForumController.createForum() instead.
@@ -62,6 +58,10 @@ trait PagesDao {
       // Perhaps OpenChat pages should be created via MessagesDao too? [5KTE02Z]
     }
 
+    if (pageRole.isGroupTalk && byWho.isGuest) {
+      throwForbidden("EdE7KFWY64", "Guests may not create group talk pages")
+    }
+
     if (bodyTextAndHtml.safeHtml.trim.isEmpty)
       throwForbidden("DwE3KFE29", "Page body should not be empty")
 
@@ -71,12 +71,14 @@ trait PagesDao {
     if (titleTextAndHtml.safeHtml.trim.isEmpty)
       throwForbidden("DwE5KPEF21", "Page title should not be empty")
 
+    quickCheckIfSpamThenThrow(byWho, bodyTextAndHtml, spamRelReqStuff)
+
     val pagePath = readWriteTransaction { transaction =>
       val (pagePath, bodyPost) = createPageImpl(pageRole, pageStatus, anyCategoryId,
         anyFolder = anyFolder, anySlug = anySlug, showId = showId,
         titleSource = titleTextAndHtml.text, titleHtmlSanitized = titleTextAndHtml.safeHtml,
         bodySource = bodyTextAndHtml.text, bodyHtmlSanitized = bodyTextAndHtml.safeHtml,
-        pinOrder = None, pinWhere = None, byWho, transaction)
+        pinOrder = None, pinWhere = None, byWho, Some(spamRelReqStuff), transaction)
 
       val notifications = NotificationGenerator(transaction)
         .generateForNewPost(PageDao(pagePath.pageId getOrDie "DwE5KWI2", transaction), bodyPost)
@@ -98,14 +100,14 @@ trait PagesDao {
         anyCategoryId: Option[CategoryId] = None,
         anyFolder: Option[String] = None, anySlug: Option[String] = None, showId: Boolean = true,
         pinOrder: Option[Int] = None, pinWhere: Option[PinPageWhere] = None,
-        byWho: Who,
+        byWho: Who, spamRelReqStuff: Option[SpamRelReqStuff],
         transaction: SiteTransaction): (PagePath, Post) =
     createPageImpl(pageRole, pageStatus, anyCategoryId = anyCategoryId,
       anyFolder = anyFolder, anySlug = anySlug, showId = showId,
       titleSource = title.text, titleHtmlSanitized = title.safeHtml,
       bodySource = body.text, bodyHtmlSanitized = body.safeHtml,
       pinOrder = pinOrder, pinWhere = pinWhere,
-      byWho, transaction = transaction)
+      byWho, spamRelReqStuff, transaction = transaction)
 
 
   def createPageImpl(pageRole: PageRole, pageStatus: PageStatus, anyCategoryId: Option[CategoryId],
@@ -113,7 +115,7 @@ trait PagesDao {
       titleSource: String, titleHtmlSanitized: String,
       bodySource: String, bodyHtmlSanitized: String,
       pinOrder: Option[Int], pinWhere: Option[PinPageWhere],
-      byWho: Who,
+      byWho: Who, spamRelReqStuff: Option[SpamRelReqStuff],
       transaction: SiteTransaction, hidePageBody: Boolean = false,
       bodyPostType: PostType = PostType.Normal): (PagePath, Post) = {
 
@@ -136,6 +138,7 @@ trait PagesDao {
     require(pinOrder.isDefined == pinWhere.isDefined, "Ese5MJK2")
 
     // Don't allow more than ... 10 topics with no critique? For now only.
+    // For now, don't restrict PageRole.UsabilityTesting — I'll "just" sort by oldest-first instead?
     if (pageRole == PageRole.Critique) { // [plugin] [85SKW32]
       anyCategoryId foreach { categoryId =>
         val pages = listPagesInCategory(categoryId, includeDescendants = true,
@@ -226,24 +229,25 @@ trait PagesDao {
       postType = bodyPostType,
       approvedById = approvedById)
       .copy(
-        hiddenAt = ifThenSome(hidePageBody, transaction.currentTime),
-        hiddenById = ifThenSome(hidePageBody, authorId))
+        bodyHiddenAt = ifThenSome(hidePageBody, transaction.currentTime),
+        bodyHiddenById = ifThenSome(hidePageBody, authorId),
+        bodyHiddenReason = None) // add `hiddenReason` function parameter?
 
     val uploadPaths = UploadsDao.findUploadRefsInPost(bodyPost)
 
-    SECURITY ; SHOULD // set publishDirectly = false, if !shallApprove — but this requires
-    // changes elsewhere too, fix later.
     val pageMeta = PageMeta.forNewPage(pageId, pageRole, authorId, transaction.currentTime,
       pinOrder = pinOrder, pinWhere = pinWhere,
-      categoryId = anyCategoryId, url = None, publishDirectly = true)
+      categoryId = anyCategoryId, url = None, publishDirectly = true,
+      hidden = approvedById.isEmpty) // [7AWU2R0]
 
     val reviewTask = if (reviewReasons.isEmpty) None
     else Some(ReviewTask(
       id = transaction.nextReviewTaskId(),
       reasons = reviewReasons.to[immutable.Seq],
-      causedById = author.id,
+      createdById = SystemUserId,
       createdAt = transaction.currentTime,
       createdAtRevNr = Some(bodyPost.currentRevisionNr),
+      maybeBadUserId = authorId,
       pageId = Some(pageId),
       postId = Some(bodyPost.uniqueId),
       postNr = Some(bodyPost.nr)))
@@ -256,7 +260,9 @@ trait PagesDao {
       doneAt = transaction.currentTime,
       browserIdData = byWho.browserIdData,
       pageId = Some(pageId),
-      pageRole = Some(pageRole))
+      pageRole = Some(pageRole),
+      uniquePostId = Some(bodyPost.uniqueId),
+      postNr = Some(bodyPost.nr))
 
     transaction.insertPageMetaMarkSectionPageStale(pageMeta)
     transaction.insertPagePath(pagePath)
@@ -269,6 +275,7 @@ trait PagesDao {
     insertAuditLogEntry(auditLogEntry, transaction)
 
     transaction.indexPostsSoon(titlePost, bodyPost)
+    spamRelReqStuff.foreach(transaction.spamCheckPostsSoon(byWho, _, titlePost, bodyPost))
 
     // Don't start rendering html for this page in the background. [5KWC58]
     // (Instead, when the user requests the page, we'll render it directly in
@@ -490,44 +497,9 @@ trait PagesDao {
     if (User.isGuestId(who.id))
       throwForbidden("EsE3GBS5", "Guest users cannot join/leave pages")
 
-    val (pageMeta, couldntAdd) = addRemoveUsersToPageImpl(Set(who.id), pageId, add = join, who)
-    if (join && couldntAdd.nonEmpty) {
-      dieIf(couldntAdd.size != 1, "EsE7KPU02")
-      dieIf(couldntAdd.head.id != who.id, "EsE5PKT8")
-      // Couldn't add the user to the page: s/he has already been added.
-      // This would happen if a user opens two tabs and clicks Join Chat in both.
-      // Or if someone adds the user, which then clicks Join in an old tab in his/her browser.
-      // (This is OK.)
-    }
-
-    val oldWatchbar = loadWatchbar(who.id)
-    val newWatchbar =
-      if (pageMeta.pageRole.isChat) {
-        // Race condition, if the same user e.g. also leaves the page right now.
-        // Fairly harmless though, since humans are single threaded.
-        if (join) oldWatchbar.addChatChannelMarkSeen(pageId)
-        else oldWatchbar.removeChatChannel(pageId)
-      }
-      else {
-        // Later: could be group direct messages too (not just FormalMessage)
-        dieIf(pageMeta.pageRole != PageRole.FormalMessage, "EsE4FK02")
-        if (join) oldWatchbar.addDirectMessage(pageId, hasSeenIt = true)
-        else oldWatchbar.removeDirectMessage(pageId)
-      }
-
-    // Race.
-    saveWatchbar(who.id, newWatchbar)
-    if (join) {
-      // Another race condition.
-      pubSub.userWatchesPages(siteId, who.id, newWatchbar.watchedPageIds)
-    }
-    else {
-      // Don't stop watching the page. It'll probably appear in the recent-topics
-      // list, and remain visible there for a while, so we still want to be notified about it.
-      // But ... when stop watching it? SHOULD think about that.
-    }
-
-    Some(newWatchbar)
+    val watchbarsByUserId = addRemoveUsersToPageImpl(Set(who.id), pageId, add = join, who)
+    val anyNewWatchbar = watchbarsByUserId.get(who.id)
+    anyNewWatchbar
   }
 
 
@@ -542,7 +514,7 @@ trait PagesDao {
 
 
   private def addRemoveUsersToPageImpl(userIds: Set[UserId], pageId: PageId, add: Boolean,
-        byWho: Who): (PageMeta, Set[User]) = {
+        byWho: Who): Map[UserId, BareWatchbar] = {
     if (byWho.isGuest)
       throwForbidden("EsE2GK7S", "Guests cannot add/remove people to pages")
 
@@ -552,9 +524,9 @@ trait PagesDao {
     if (userIds.exists(User.isGuestId) && add)
       throwForbidden("EsE5PKW1", "Cannot add guests to a page")
 
-    var couldntAdd: Set[User] = Set.empty
+    var couldntAdd: Set[UserId] = Set.empty
 
-    val result = readWriteTransaction { transaction =>
+    val pageMeta = readWriteTransaction { transaction =>
       val pageMeta = transaction.loadPageMeta(pageId) getOrElse
         throwIndistinguishableNotFound("42PKD0")
 
@@ -562,7 +534,7 @@ trait PagesDao {
       val me = usersById.getOrElse(byWho.id, throwForbidden(
         "EsE6KFE0X", s"Your user cannot be found, id: ${byWho.id}"))
 
-      lazy val numMembersAlready = transaction.loadUsersOnPageAsMap2(pageId).size
+      lazy val numMembersAlready = transaction.loadMessageMembers(pageId).size
       if (add && numMembersAlready + userIds.size > 200) {
         // I guess something, not sure what?, would break if too many people join
         // the same page.
@@ -590,8 +562,9 @@ trait PagesDao {
           COULD_OPTIMIZE // batch insert all users at once
           val wasAdded = transaction.insertMessageMember(pageId, userId = id, addedById = me.id)
           if (!wasAdded) {
-            // Someone else has added that user already.
-            couldntAdd += usersById.getOrDie(id, "EsE5PK02")
+            // Someone else has added that user already. Could happen e.g. if someone adds you
+            // to a chat channel, and you attempt to join it yourself at the same time.
+            couldntAdd += id
           }
         }
       }
@@ -608,7 +581,7 @@ trait PagesDao {
       // rather pointless, instead, # new comments per time unit matters more, but then it's
       // simpler to instead show # users?)
       transaction.updatePageMeta(pageMeta, oldMeta = pageMeta, markSectionPageStale = false)
-      (pageMeta, couldntAdd)
+      pageMeta
     }
 
     SHOULD // push new member notf to browsers, so that this gets updated: [5FKE0WY2]
@@ -618,7 +591,48 @@ trait PagesDao {
 
     // The page JSON includes a list of all page members, so:
     refreshPageInMemCache(pageId)
-    result
+
+    var watchbarsByUserId = Map[UserId, BareWatchbar]()
+    userIds foreach { userId =>
+      if (couldntAdd.contains(userId)) {
+        // Need not update the watchbar.
+      }
+      else {
+        addRemovePageToWatchbar(pageMeta, userId, add) foreach { newWatchbar =>
+          watchbarsByUserId += userId -> newWatchbar
+        }
+      }
+    }
+    watchbarsByUserId
+  }
+
+
+  private def addRemovePageToWatchbar(pageMeta: PageMeta, userId: UserId, add: Boolean)
+        : Option[BareWatchbar] = {
+    BUG; RACE // when loading & saving the watchbar. E.g. if a user joins a page herself, and
+    // another member adds her to the page, or another page, at the same time.
+
+    val oldWatchbar = getOrCreateWatchbar(userId)
+    val newWatchbar = {
+      if (add) oldWatchbar.addPage(pageMeta, hasSeenIt = true)
+      else oldWatchbar.removePageTryKeepInRecent(pageMeta)
+    }
+
+    if (oldWatchbar == newWatchbar) {
+      // This happens if we're adding a user whose in-memory watchbar got created in
+      // `loadWatchbar` above — then the watchbar will likely be up-to-date already, here.
+      return None
+    }
+
+    saveWatchbar(userId, newWatchbar)
+
+    // If pages were added to the watchbar, we should start watching them. If we left
+    // a private page, it'll disappear from the watchbar — then we should stop watching it.
+    if (oldWatchbar.watchedPageIds != newWatchbar.watchedPageIds) {
+      pubSub.userWatchesPages(siteId, userId, newWatchbar.watchedPageIds)
+    }
+
+    Some(newWatchbar)
   }
 
 

@@ -20,8 +20,7 @@
 /// <reference path="../prelude.ts" />
 /// <reference path="../constants.ts" />
 /// <reference path="../utils/react-utils.ts" />
-/// <reference path="../editor/editor.ts" />
-/// <reference path="../login/login-dialog.ts" />
+/// <reference path="../utils/utils.ts" />
 /// <reference path="../utils/window-zoom-resize-mixin.ts" />
 /// <reference path="../utils/DropdownModal.ts" />
 /// <reference path="../util/ExplainingDropdown.ts" />
@@ -29,27 +28,19 @@
 /// <reference path="../ServerApi.ts" />
 /// <reference path="../page/discussion.ts" />
 /// <reference path="../page/scroll-buttons.ts" />
+/// <reference path="../widgets.ts" />
+/// <reference path="../more-bundle-not-yet-loaded.ts" />
+/// <reference path="../editor-bundle-not-yet-loaded.ts" />
 
 //------------------------------------------------------------------------------
-   module debiki2.forum {
+   namespace debiki2.forum {
 //------------------------------------------------------------------------------
 
-var d = { i: debiki.internal, u: debiki.v0.util };
 var r = React.DOM;
-var reactCreateFactory = React['createFactory'];
-var ReactBootstrap: any = window['ReactBootstrap'];
-var Button = reactCreateFactory(ReactBootstrap.Button);
 var DropdownModal = utils.DropdownModal;
 var ExplainingListItem = util.ExplainingListItem;
 type ExplainingTitleText = util.ExplainingTitleText;
-var MenuItem = reactCreateFactory(ReactBootstrap.MenuItem);
 var HelpMessageBox = debiki2.help.HelpMessageBox;
-
-var ReactRouter = window['ReactRouter'];
-var Route = reactCreateFactory(ReactRouter.Route);
-var IndexRoute = reactCreateFactory(ReactRouter.IndexRoute);
-var Redirect = reactCreateFactory(ReactRouter.Redirect);
-var Link = reactCreateFactory(ReactRouter.Link);
 
 var MaxWaitingForCritique = 10; // for now only [plugin]
 
@@ -78,13 +69,13 @@ export function buildForumRoutes() {
       Redirect({ from: RoutePathLatest + '/', to: rootSlash + RoutePathLatest }),
       Redirect({ from: RoutePathTop + '/', to: rootSlash + RoutePathTop }),
       Redirect({ from: RoutePathCategories + '/', to: rootSlash + RoutePathCategories }),
-      Route({ path: RoutePathLatest, component: ForumTopicListComponent },
-        IndexRoute({ component: ForumTopicListComponent }),
-        Route({ path: ':categorySlug', component: ForumTopicListComponent })),
-      Route({ path: RoutePathTop, component: ForumTopicListComponent },
-        IndexRoute({ component: ForumTopicListComponent }),
-        Route({ path: ':categorySlug', component: ForumTopicListComponent })),
-      Route({ path: RoutePathCategories, component: ForumCategoriesComponent }))];
+      Route({ path: RoutePathLatest, component: LoadAndListTopicsComponent },
+        IndexRoute({ component: LoadAndListTopicsComponent }),
+        Route({ path: ':categorySlug', component: LoadAndListTopicsComponent })),
+      Route({ path: RoutePathTop, component: LoadAndListTopicsComponent },
+        IndexRoute({ component: LoadAndListTopicsComponent }),
+        Route({ path: ':categorySlug', component: LoadAndListTopicsComponent })),
+      Route({ path: RoutePathCategories, component: LoadAndListCategoriesComponent }))];
 }
 
 
@@ -105,39 +96,60 @@ var ForumComponent = React.createClass(<any> {
   mixins: [debiki2.StoreListenerMixin],
 
   getInitialState: function() {
-    return debiki2.ReactStore.allData();
+    var store: Store = debiki2.ReactStore.allData();
+    return {
+      store: store,
+      topicsInStoreMightBeOld: false,
+      useWideLayout: this.isPageWide(store),
+    }
   },
 
   onChange: function() {
-    this.setState(debiki2.ReactStore.allData());
-    // Now some time has passed since this page was loaded, so:
-    this.setState({ topicsInStoreMightBeOld: true });
+    this.setState({
+      store: debiki2.ReactStore.allData(),
+      // Now some time has passed since this page was loaded, so:
+      topicsInStoreMightBeOld: true,
+    });
+  },
+
+  componentDidMount: function() {
+    // Dupl code [5KFEWR7]
+    this.timerHandle = setInterval(this.checkSizeChangeLayout, 200);
+  },
+
+  componentWillUnmount: function() {
+    this.isGone = true;
+    clearInterval(this.timerHandle);
+  },
+
+  checkSizeChangeLayout: function() {
+    // Dupl code [5KFEWR7]
+    if (this.isGone) return;
+    var isWide = this.isPageWide();
+    if (isWide !== this.state.useWideLayout) {
+      this.setState({ useWideLayout: isWide });
+    }
+  },
+
+  isPageWide: function(store?: Store) {
+    return store_getApproxPageWidth(store || this.state.store) > UseWideForumLayoutMinWidth;
   },
 
   getActiveCategory: function() {
+    var store: Store = this.state.store;
     var activeCategory: any;
     var activeCategorySlug = this.props.params.categorySlug;
     if (activeCategorySlug) {
-      // (( Old comment, for react-router 0.13, now I use 2.0:
-      // Don't know why, but sometimes after having edited or created a category and
-      // then transitioned to its edited/new slug, then getParams().categorySlug
-      // still points to the old previous slug. Therefore, if we didn't find
-      // activeCategorySlug, try this.state.newCategorySlug instead. ))
-      activeCategory = _.find(this.state.categories, (category: Category) => {
+      activeCategory = _.find(store.categories, (category: Category) => {
         return category.slug === activeCategorySlug;
       });
-      if (!activeCategory) {
-        activeCategory = _.find(this.state.categories, (category: Category) => {
-          var match = category.slug === this.state.newCategorySlug;
-          console.warn("Weird this.state.categories code is needed [EsE5GUKS2]");
-          return match;
-        });
-      }
+      // If `activeCategory` is null here, that's probably because the category is
+      // included in user specific data that hasn't been activated yet. (6KEWM02)
     }
-    if (!activeCategory) {
+    else {
       activeCategory = {
         name: "All categories",
-        id: this.state.categoryId, // the forum root category id
+        id: store.categoryId, // the forum root category id
         isForumItself: true,
         newTopicTypes: [],
       };
@@ -146,7 +158,7 @@ var ForumComponent = React.createClass(<any> {
   },
 
   makeHelpMessage: function(category: Category): any {
-    var store: Store = this.state;
+    var store: Store = this.state.store;
     var me: Myself = store.me;
     if (!_.isEqual(category.newTopicTypes, [PageRole.Critique])) // [plugin] ...
       return null;
@@ -181,15 +193,16 @@ var ForumComponent = React.createClass(<any> {
   },
 
   render: function() {
-    var store: Store = this.state;
+    var store: Store = this.state.store;
     var activeCategory = this.getActiveCategory();
-    var helpMessage = this.makeHelpMessage(activeCategory);
+    var helpMessage = activeCategory ? this.makeHelpMessage(activeCategory) : null;
     helpMessage = helpMessage
         ? debiki2.help.HelpMessageBox({ message: helpMessage })
         : null;
 
-    var childProps = _.assign({}, this.state, {
+    var childProps = _.assign({}, {
       store: store,
+      useTable: this.state.useWideLayout,
       route: this.props.route,
       location: this.props.location,
       activeCategory: activeCategory,
@@ -220,7 +233,7 @@ var ForumComponent = React.createClass(<any> {
       r.div({ className: 'container dw-forum' },
         // Include .dw-page to make renderDiscussionPage() in startup.js run: (a bit hacky)
         r.div({ className: 'dw-page' }),
-        ForumIntroText(this.state),
+        ForumIntroText({ store: store }),
         helpMessage,
         ForumButtons(forumButtonProps),
         topsAndCatsHelp,
@@ -240,13 +253,15 @@ var topicsAndCatsHelpMessage = {
 
 var ForumIntroText = createComponent({
   render: function() {
-    var user: Myself = this.props.me;
-    var introPost = this.props.allPosts[BodyId];
-    if (!introPost || introPost.isPostHidden)
+    var store: Store = this.props.store;
+    var user: Myself = store.me;
+    var introPost = store.allPosts[BodyId];
+    if (!introPost || introPost.isBodyHidden)
       return null;
 
     var anyEditIntroBtn = user.isAdmin
-        ? r.a({ className: 'esForumIntro_edit icon-edit', onClick: openEditIntroDialog }, "Edit")
+        ? r.a({ className: 'esForumIntro_edit icon-edit',
+              onClick: morebundle.openEditIntroDialog }, "Edit")
         : null;
 
     return r.div({ className: 'esForumIntro' },
@@ -304,19 +319,21 @@ var ForumButtons = createComponent({
   },
 
   setCategory: function(newCategorySlug) {
+    var store: Store = this.props.store;
     dieIf(this.props.routes.length < 2, 'EsE6YPKU2');
     this.closeCategoryDropdown();
     var currentPath = this.props.routes[SortOrderRouteIndex].path;
     var nextPath = currentPath === RoutePathCategories ? RoutePathLatest : currentPath;
     var slashSlug = newCategorySlug ? '/' + newCategorySlug : '';
     this.context.router.push({
-      pathname: this.props.pagePath.value + nextPath + slashSlug,
+      pathname: store.pagePath.value + nextPath + slashSlug,
       query: this.props.location.query,
     });
   },
 
   findTheDefaultCategory: function() {
-    return _.find(this.props.categories, (category: Category) => {
+    var store: Store = this.props.store;
+    return _.find(store.categories, (category: Category) => {
         return category.isDefaultCategory;
     });
   },
@@ -332,9 +349,10 @@ var ForumButtons = createComponent({
   },
 
   setSortOrder: function(newPath: string) {
+    var store: Store = this.props.store;
     this.closeSortOrderDropdown();
     this.context.router.push({
-      pathname: this.props.pagePath.value + newPath + this.slashCategorySlug(),
+      pathname: store.pagePath.value + newPath + this.slashCategorySlug(),
       query: this.props.location.query,
     });
   },
@@ -393,7 +411,7 @@ var ForumButtons = createComponent({
   }, */
 
   editCategory: function() {
-    debiki2.forum['getEditCategoryDialog'](dialog => {
+    morebundle.getEditCategoryDialog(dialog => {
       if (this.isMounted()) {
         dialog.open(this.props.activeCategory.id);
       }
@@ -401,7 +419,7 @@ var ForumButtons = createComponent({
   },
 
   createCategory: function() {
-    debiki2.forum['getEditCategoryDialog'](dialog => {
+    morebundle.getEditCategoryDialog(dialog => {
       if (this.isMounted()) {
         dialog.open();
       }
@@ -410,7 +428,7 @@ var ForumButtons = createComponent({
 
   createTopic: function() {
     var anyReturnToUrl = window.location.toString().replace(/#/, '__dwHash__');
-    login.loginIfNeeded('LoginToCreateTopic', anyReturnToUrl, () => {
+    morebundle.loginIfNeeded('LoginToCreateTopic', anyReturnToUrl, () => {
       var category: Category = this.props.activeCategory;
       if (category.isForumItself) {
         category = this.findTheDefaultCategory();
@@ -424,7 +442,11 @@ var ForumButtons = createComponent({
         debiki2.editor.editNewForumPage(category.id, newTopicTypes[0]);
       }
       else {
-        forum['getCreateTopicDialog']().open(category);
+        // There are many topic types specified for this category, because previously there
+        // was a choose-topic-type dialog. But I deleted that dialog; it made people confused.
+        // Right now, just default to Discussion instead. Later, change newTopicTypes from
+        // a collection to a defaultTopicType field; then this else {} can be deleted. [5YKW294]
+        debiki2.editor.editNewForumPage(category.id, PageRole.Discussion);
       }
     });
   },
@@ -435,15 +457,18 @@ var ForumButtons = createComponent({
 
   render: function() {
     var state = this.state;
-    var props: Store = this.props;
-    var me = props.me;
+    var store: Store = this.props.store;
+    var me: Myself = store.me;
     var activeCategory: Category = this.props.activeCategory;
     if (!activeCategory) {
       // The user has typed a non-existing category slug in the URL. Or she has just created
       // a category, opened a page and then clicked Back in the browser. Then this page
       // reloads, and the browser then uses cached HTML including JSON in which the new
       // category does not yet exist. Let's try to reload the category list page:
-      return r.p({},
+      // (However, if user-specific-data hasn't yet been activated, the "problem" is probably
+      // just that we're going to show a restricted category, which isn't available before
+      // user specific data added. (6KEWM02). )
+      return !store.userSpecificDataAdded ? null : r.p({},
         "Category not found. Did you just create it? Then reload the page please. [EsE04PK27]");
     }
 
@@ -456,7 +481,7 @@ var ForumButtons = createComponent({
         r.div({ className: 'esF_BB_PageTitle' }, "Categories") : null;
 
     var makeCategoryLink = (where, text, linkId, extraClass?) => Link({
-      to: { pathname: this.props.pagePath.value + where, query: this.props.location.query },
+      to: { pathname: store.pagePath.value + where, query: this.props.location.query },
       id: linkId,
       className: 'btn esForum_catsNav_btn ' + (extraClass || ''),
       activeClassName: 'active' }, text);
@@ -469,9 +494,8 @@ var ForumButtons = createComponent({
     var topicListLink = showsTopicList ? null :
       makeCategoryLink(RoutePathLatest, "Topic list", 'e2eViewTopicsB', 'esForum_navLink');
 
-    var categoryMenuItems = props.categories.map((category: Category) => {
-      return MenuItem({ eventKey: category.slug, key: category.id,
-          active: activeCategory.id === category.id,
+    var categoryMenuItems = store.categories.map((category: Category) => {
+      return MenuItem({ key: category.id, active: activeCategory.id === category.id,
           onClick: () => this.setCategory(category.slug) }, category.name);
     });
 
@@ -482,7 +506,7 @@ var ForumButtons = createComponent({
         activeCategory.isForumItself;
 
     categoryMenuItems.unshift(
-        MenuItem({ eventKey: null, key: -1, active: listsTopicsInAllCats,
+        MenuItem({ key: -1, active: listsTopicsInAllCats,
           onClick: () => this.setCategory('') }, "All categories"));
 
     // [refactor] use ModalDropdownButton instead
@@ -599,15 +623,15 @@ var ForumButtons = createComponent({
     if (sortOrderRoutePath !== RoutePathCategories && !(
           activeCategory.onlyStaffMayCreateTopics && !isStaff(me))) {
      if (this.props.numWaitingForCritique < MaxWaitingForCritique)  // for now only [plugin]
-      createTopicBtn = Button({ onClick: this.createTopic, bsStyle: 'primary', id: 'e2eCreateSth',
+      createTopicBtn = PrimaryButton({ onClick: this.createTopic, id: 'e2eCreateSth',
           className: 'esF_BB_CreateBtn'},
         createTopicBtnTitle(activeCategory));
     }
 
     var createCategoryBtn;
     if (sortOrderRoutePath === RoutePathCategories && me.isAdmin) {
-      createCategoryBtn = Button({ onClick: this.createCategory, bsStyle: 'primary',
-          id: 'e2eCreateCategoryB' }, "Create Category");
+      createCategoryBtn = PrimaryButton({ onClick: this.createCategory, id: 'e2eCreateCategoryB' },
+        "Create Category");
     }
 
     var editCategoryBtn;
@@ -636,15 +660,22 @@ var ForumButtons = createComponent({
 
 
 
-var ForumTopicListComponent = React.createClass(<any> {
+var LoadAndListTopicsComponent = React.createClass(<any> {
   getInitialState: function(): any {
     // The server has included in the Flux store a list of the most recent topics, and we
     // can use that lis when rendering the topic list server side, or for the first time
     // in the browser (but not after that, because then new topics might have appeared).
-    if (!this.props.topicsInStoreMightBeOld && this.isAllLatestTopicsView()) {
+    let store: Store = this.props.store;
+    // If we're authenticated, the topic list depends a lot on our permissions & groups.
+    // Then, send a request, to get the correct topic list (otherwise,
+    // as of 2016-12, hidden topics won't be included even if they should be [7RIQ29]).
+    let me: Myself = (debiki.volatileDataFromServer || {}).me;
+    let canUseTopicsInScriptTag = !me || !me.isAuthenticated;
+    if (!this.props.topicsInStoreMightBeOld && this.isAllLatestTopicsView() &&
+        canUseTopicsInScriptTag) {
       return {
-        topics: this.props.topics,
-        showLoadMoreButton: this.props.topics.length >= NumNewTopicsPerRequest
+        topics: store.topics,
+        showLoadMoreButton: store.topics.length >= NumNewTopicsPerRequest
       };
     }
     else {
@@ -669,16 +700,18 @@ var ForumTopicListComponent = React.createClass(<any> {
     this.loadTopics(nextProps, false);
   },
 
-  componentDidUpdate: function() {
-    processTimeAgo();
-  },
-
   onLoadMoreTopicsClick: function(event) {
     this.loadTopics(this.props, true);
     event.preventDefault();
   },
 
   loadTopics: function(nextProps, loadMore) {
+    if (!nextProps.activeCategory) {
+      // Probably a restricted category, won't be available until user-specific-data
+      // has been activated (by ReactStore.activateMyself). (6KEWM02)
+      return;
+    }
+
     var isNewView =
       this.props.location.pathname !== nextProps.location.pathname ||
       this.props.location.search !== nextProps.location.search;
@@ -688,7 +721,7 @@ var ForumTopicListComponent = React.createClass(<any> {
     // Avoid loading the same topics many times:
     // - On page load, componentDidMount() and componentWillReceiveProps() both loads topics.
     // - When we're refreshing the page because of Flux events, don't load the same topics again.
-    if (!isNewView && !loadMore && (this.state.topics || this.state.isLoading))
+    if (!isNewView && !loadMore && (this.state.topics || this.isLoading))
       return;
 
     var orderOffset: OrderOffset = this.getOrderOffset(nextProps);
@@ -700,11 +733,14 @@ var ForumTopicListComponent = React.createClass(<any> {
         showLoadMoreButton: false
       });
       // Load from the start, no offset. Keep any topic filter though.
-      delete orderOffset.time;
+      delete orderOffset.whenMs;
       delete orderOffset.numLikes;
     }
     var categoryId = nextProps.activeCategory.id;
-    this.setState({ isLoading: true });
+    // Don't use this.state.isLoading, because the state change doesn't happen instantly,
+    // so componentWillReceiveProps() would get called first, and it would call loadTopics again
+    // while this.state.isLoading was still false, resulting in an unneeded server request.
+    this.isLoading = true;
     debiki2.Server.loadForumTopics(categoryId, orderOffset, (newlyLoadedTopics: Topic[]) => {
       if (!this.isMounted())
         return;
@@ -713,9 +749,9 @@ var ForumTopicListComponent = React.createClass(<any> {
       topics = topics.concat(newlyLoadedTopics);
       // `topics` includes at least the last old topic twice.
       topics = _.uniqBy(topics, 'pageId');
+      this.isLoading = false;
       this.setState({
         minHeight: null,
-        isLoading: false,
         topics: topics,
         showLoadMoreButton: newlyLoadedTopics.length >= NumNewTopicsPerRequest
       });
@@ -724,6 +760,7 @@ var ForumTopicListComponent = React.createClass(<any> {
   },
 
   countTopicsWaitingForCritique: function(topics?) { // for now only  [plugin]
+    if (!this.props.activeCategory) return;
     topics = topics || this.state.topics;
     var numWaitingForCritique = 0;
     if (_.isEqual(this.props.activeCategory.newTopicTypes, [PageRole.Critique])) {
@@ -742,20 +779,50 @@ var ForumTopicListComponent = React.createClass(<any> {
     var anyLastTopic: any = _.last(this.state.topics);
     if (anyLastTopic) {
       // If we're loading more topics, we should continue with this offset.
-      anyTimeOffset = anyLastTopic.bumpedEpoch || anyLastTopic.createdEpoch;
+      anyTimeOffset = anyLastTopic.bumpedAtMs || anyLastTopic.createdAtMs;
       anyLikesOffset = anyLastTopic.numLikes;
     }
     var orderOffset: OrderOffset = { sortOrder: -1 };
     if (props.routes[SortOrderRouteIndex].path === RoutePathTop) {
       orderOffset.sortOrder = TopicSortOrder.LikesAndBumpTime;
-      orderOffset.time = anyTimeOffset;
+      orderOffset.whenMs = anyTimeOffset;
       orderOffset.numLikes = anyLikesOffset;
     }
     else {
       orderOffset.sortOrder = TopicSortOrder.BumpTime;
-      orderOffset.time = anyTimeOffset;
+      orderOffset.whenMs = anyTimeOffset;
     }
     return orderOffset;
+  },
+
+  render: function() {
+    return ListTopicsComponent({
+      topics: this.state.topics,
+      store: this.props.store,
+      useTable: this.props.useTable,
+      minHeight: this.state.minHeight,
+      showLoadMoreButton: this.state.showLoadMoreButton,
+      activeCategory: this.props.activeCategory,
+      orderOffset: this.getOrderOffset(),
+      // `routes` and `location` needed because category clickable. [7FKR0QA]
+      // COULD try to find some other way to link categories to URL paths, that works
+      // also in the user-activity.more.ts topic list. [7FKR0QA]
+      linkCategories: true,
+      routes: this.props.routes,
+      location: this.props.location,
+    });
+  },
+});
+
+
+
+export var ListTopicsComponent = createComponent({
+  getInitialState: function() {
+    return {};
+  },
+
+  componentDidUpdate: function() {
+    processTimeAgo();
   },
 
   openIconsHelp: function() {
@@ -765,25 +832,29 @@ var ForumTopicListComponent = React.createClass(<any> {
 
   render: function() {
     var store: Store = this.props.store;
-    if (!this.state.topics) {
+    let topics: Topic[] = this.props.topics;
+    if (!topics) {
       // The min height preserves scrollTop, even though the topic list becomes empty
       // for a short while (which would otherwise reduce the windows height which
       // in turn might reduce scrollTop).
       // COULD make minHeight work when switching to the Categories view too? But should
       // then probably scroll the top of the categories list into view.
-      // COULD use this.props.topics, used when rendering server side, but for now:
-      return r.p({ style: { minHeight: this.state.minHeight } }, 'Loading...');
+      // COULD use store.topics, used when rendering server side, but for now:
+      return r.p({ style: { minHeight: this.props.minHeight } }, 'Loading...');
     }
 
-    if (!this.state.topics.length)
-      return r.p({}, 'No topics.');
+    if (!topics.length)
+      return r.p({ id: 'e2eF_NoTopics' }, 'No topics.');
 
-    var topics = this.state.topics.map((topic: Topic) => {
+    let useTable = this.props.useTable;
+
+    let activeCategory: Category = this.props.activeCategory;
+    let topicElems = topics.map((topic: Topic) => {
       return TopicRow({
-          topic: topic, categories: this.props.categories,
-          activeCategory: this.props.activeCategory, now: this.props.now,
+          store: store, topic: topic, categories: store.categories,
+          activeCategory: activeCategory, now: store.now,
           key: topic.pageId, routes: this.props.routes, location: this.props.location,
-          pagePath: store.pagePath });
+          pagePath: store.pagePath, inTable: useTable });
     });
 
     // Insert an icon explanation help message in the topic list. Anywhere else, and
@@ -804,13 +875,14 @@ var ForumTopicListComponent = React.createClass(<any> {
         ? r.a({ className: 'esForum_topics_openIconsHelp icon-info-circled',
               onClick: this.openIconsHelp }, "Explain icons...")
         : HelpMessageBox({ message: IconHelpMessage, showUnhideTips: false });
-    topics.splice(Math.min(topics.length, numFewTopics), 0,
-      r.tr({ key: 'ExplIcns'},
-        r.td({ colSpan: 5 }, iconsHelpStuff)));
+    topicElems.splice(Math.min(topicElems.length, numFewTopics), 0,
+      useTable
+        ? r.tr({ key: 'ExplIcns' }, r.td({ colSpan: 5 }, iconsHelpStuff))
+        : r.li({ key: 'ExplIcns', className: 'esF_TsL_T clearfix' }, iconsHelpStuff));
 
-    var loadMoreTopicsBtn;
-    if (this.state.showLoadMoreButton) {
-      var orderOffset = this.getOrderOffset();
+    let loadMoreTopicsBtn;
+    let orderOffset = this.props.orderOffset;
+    if (this.props.showLoadMoreButton) {
       var queryString = '?' + debiki2.ServerApi.makeForumTopicsQueryParams(orderOffset);
       loadMoreTopicsBtn =
         r.div({},
@@ -818,26 +890,39 @@ var ForumTopicListComponent = React.createClass(<any> {
               href: queryString }, 'Load more ...'));
     }
 
-    var sortingHowTips;
-    if (this.getOrderOffset().sortOrder === TopicSortOrder.LikesAndBumpTime) {
+    let sortingHowTips;
+    if (orderOffset.sortOrder === TopicSortOrder.LikesAndBumpTime) {
       sortingHowTips =
-          r.p({ className: 'esForum_sortInfo' }, "Topics with the most Like votes:");
+          r.p({ className: 'esForum_sortInfo e_F_SI_Top' }, "Topics with the most Like votes:");
     }
 
-    return (
-      r.div({},
-        sortingHowTips,
-        r.table({ className: 'dw-topic-list' },
+    let deletedClass = !activeCategory.isDeleted ? '' : ' s_F_Ts-CatDd';
+    let categoryDeletedInfo = !activeCategory.isDeleted ? null :
+      r.p({ className: 'icon-trash s_F_CatDdInfo' },
+        "This category has been deleted");
+
+    var topicsTable = !useTable ? null :
+        r.table({ className: 'esF_TsT s_F_Ts-Wide dw-topic-list' + deletedClass },
           r.thead({},
             r.tr({},
               r.th({}, "Topic"),
-              r.th({}, "Category"),
-              r.th({}, "Users"),
+              r.th({ className: 's_F_Ts_T_CN' }, "Category"),
+              r.th({ className: 's_F_Ts_T_Avs' }, "Users"),
               r.th({ className: 'num dw-tpc-replies' }, "Replies"),
               r.th({ className: 'num' }, "Activity"))),
               // skip for now:  r.th({ className: 'num' }, "Feelings"))),  [8PKY25]
           r.tbody({},
-            topics)),
+            topicElems));
+
+    var topicRows = useTable ? null :
+        r.ol({ className: 'esF_TsL s_F_Ts-Nrw' + deletedClass },
+          topicElems);
+
+    return (
+      r.div({},
+        categoryDeletedInfo,
+        sortingHowTips,
+        topicsTable || topicRows,
         loadMoreTopicsBtn));
   }
 });
@@ -887,6 +972,16 @@ var IconHelpMessage = {
 var TopicRow = createComponent({
   contextTypes: {
     router: React.PropTypes.object.isRequired
+  },
+
+  getInitialState: function() {
+    return {
+      showMoreExcerpt: false,
+    };
+  },
+
+  showMoreExcerpt: function() {
+    this.setState({ showMoreExcerpt: true });
   },
 
   // Currently not in use, see [8PKY25].
@@ -941,18 +1036,29 @@ var TopicRow = createComponent({
     return lowerBound;
   },
 
-  switchCategory: function(category: Category) {
-    dieIf(this.props.routes.length < 2, 'EsE5U2Z');
+  makeCategoryLink: function(category: Category, skipQuery?: boolean) {
+    var store: Store = this.props.store;
+    dieIf(this.props.routes.length < 2, 'EdE5U2ZG');  // [7FKR0QA]
     var sortOrderPath = this.props.routes[SortOrderRouteIndex].path;
-    this.context.router.push({
-      pathname: this.props.pagePath.value + sortOrderPath + '/' + category.slug,
-      query: this.props.location.query,
-    });
+    // this.props.location.query — later: could convert to query string, unless skipQuery === true
+    return store.pagePath.value + sortOrderPath + '/' + category.slug;
+  },
+
+  makeOnCategoryClickFn: function(category: Category) {
+    return (event) => {
+      event.preventDefault();
+      let urlPath = this.makeCategoryLink(category, true);
+      this.context.router.push({
+        pathname: urlPath,
+        query: this.props.location.query,  // [7FKR0QA]
+      });
+    };
   },
 
   render: function() {
+    var store: Store = this.props.store;
     var topic: Topic = this.props.topic;
-    var category = _.find(this.props.categories, (category: Category) => {
+    var category = _.find(store.categories, (category: Category) => {
       return category.id === topic.categoryId;
     });
 
@@ -985,56 +1091,127 @@ var TopicRow = createComponent({
     // but that won't work server side, because Date.now() changes all the time.
     // Would instead need to generate the tooltip dynamically (rather than include it in the html).
     // [compress]
-    var activityTitle = "Created on " + dateTimeFix(topic.createdEpoch);
+    var activityTitle = "Created on " + whenMsToIsoDate(topic.createdAtMs);
 
-    if (topic.lastReplyEpoch) {
-      activityTitle += '\nLast reply on ' + dateTimeFix(topic.lastReplyEpoch);
+    if (topic.lastReplyAtMs) {
+      activityTitle += '\nLast reply on ' + whenMsToIsoDate(topic.lastReplyAtMs);
     }
-    if (topic.bumpedEpoch && topic.bumpedEpoch !== topic.lastReplyEpoch) {
-      activityTitle += '\nEdited on ' + dateTimeFix(topic.bumpedEpoch);
+    if (topic.bumpedAtMs && topic.bumpedAtMs !== topic.lastReplyAtMs) {
+      activityTitle += '\nEdited on ' + whenMsToIsoDate(topic.bumpedAtMs);
     }
 
-    var anyPinIconClass = topic.pinWhere ? 'icon-pin' : undefined;
-    var showExcerpt = topic.pinWhere === PinPageWhere.Globally ||
-        (topic.pinWhere && topic.categoryId === this.props.activeCategory.id);
-    var excerptIfPinned = showExcerpt
-        ? r.p({ className: 'dw-p-excerpt' }, topic.excerpt, r.a({ href: topic.url }, 'read more'))
-        : null;
+    let anyPinOrHiddenIconClass = topic.pinWhere ? 'icon-pin' : undefined;
+    if (topic.hiddenAtMs) {
+      anyPinOrHiddenIconClass = 'icon-eye-off';
+    }
+
+    let excerpt;  // [7PKY2X0]
+    let showExcerptAsParagraph =
+        topic.pinWhere === PinPageWhere.Globally ||
+        (topic.pinWhere && topic.categoryId === this.props.activeCategory.id) ||
+        store.pageLayout >= TopicListLayout.ExcerptBelowTitle;
+    if (showExcerptAsParagraph) {
+      excerpt =
+          r.p({ className: 'dw-p-excerpt' }, topic.excerpt);
+          // , r.a({ href: topic.url }, 'read more')); — no, better make excerpt click open page?
+    }
+    else if (store.pageLayout === TopicListLayout.TitleExcerptSameLine) {
+      excerpt =
+          r.span({ className: 's_F_Ts_T_Con_B' }, topic.excerpt);
+    }
+    else {
+      // No excerpt.
+      dieIf(store.pageLayout && store.pageLayout !== TopicListLayout.TitleOnly,
+          'EdE5FK2W8');
+    }
+
+    let anyThumbnails;
+    if (store.pageLayout === TopicListLayout.ThumbnailLeft) {
+      die('Unimplemented: thumbnail left [EdE7KW4024]')
+    }
+    else if (store.pageLayout === TopicListLayout.ThumbnailsBelowTitle) {
+      let thumbnailUrls = topic_mediaThumbnailUrls(topic);
+      let imgIndex = 0;
+      anyThumbnails = _.isEmpty(thumbnailUrls) ? null :
+        r.div({ className: 's_F_Ts_T_Tmbs' },
+          thumbnailUrls.map(url => r.img({ src: url, key: ++imgIndex })));
+    }
 
     var categoryName = !category ? null :
-      r.a({ onClick: () => this.switchCategory(category) }, category.name);
+      r.a({ href: this.makeCategoryLink(category), className: 'esF_Ts_T_CName',
+            onClick: this.makeOnCategoryClickFn(category) },
+        category.name);
 
-    var activityAgo = prettyLetterTimeAgo(topic.bumpedEpoch || topic.createdEpoch);
+    var activityAgo = prettyLetterTimeAgo(topic.bumpedAtMs || topic.createdAtMs);
 
     // Avatars: Original Poster, some frequent posters, most recent poster. [7UKPF26]
+    var author = store_getUserOrMissing(store, topic.authorId, 'EsE5KPF0');
     var userAvatars = [
-        avatar.Avatar({ key: 'OP', tiny: true, user: topic.author, title: "created the topic" })];
-    for (var i = 0; i < topic.frequentPosters.length; ++i) {
-      var poster = topic.frequentPosters[i];
+        avatar.Avatar({ key: 'OP', tiny: true, user: author, title: "created the topic" })];
+    for (var i = 0; i < topic.frequentPosterIds.length; ++i) {
+      var poster = store_getUserOrMissing(store, topic.frequentPosterIds[i], 'EsE2WK0F');
       userAvatars.push(avatar.Avatar({ key: poster.id, tiny: true, user: poster,
             title: "frequent poster" }));
     }
-    if (topic.lastReplyer) {
-      userAvatars.push(avatar.Avatar({ key: 'MR', tiny: true, user: topic.lastReplyer,
+    if (topic.lastReplyerId) {
+      var lastReplyer = store_getUserOrMissing(store, topic.lastReplyerId, 'EsE4GTZ7');
+      userAvatars.push(avatar.Avatar({ key: 'MR', tiny: true, user: lastReplyer,
             title: "most recent poster" }));
     }
 
-    return (
-      r.tr({ className: 'esForum_topics_topic' },
-        r.td({ className: 'dw-tpc-title' },
-          makeTitle(topic, anyPinIconClass),
-          excerptIfPinned),
-        r.td({}, categoryName),
-        r.td({}, userAvatars),
+    let manyLinesClass = '';
+    let showMoreClickHandler;
+    if (showExcerptAsParagraph) {
+      manyLinesClass = ' s_F_Ts_T_Con-Para';
+    }
+    else if (this.state.showMoreExcerpt) {
+      manyLinesClass += ' s_F_Ts_T_Con-More';
+    }
+    else {
+      manyLinesClass += ' s_F_Ts_T_Con-OneLine';
+      showMoreClickHandler = this.showMoreExcerpt;
+    }
+
+    // We use a table layout, only for wide screens, because table columns = spacy.
+    if (this.props.inTable) return (
+      r.tr({ className: 'esForum_topics_topic e2eF_T' },
+        r.td({ className: 'dw-tpc-title e2eTopicTitle' },
+          r.div({ className: 's_F_Ts_T_Con' + manyLinesClass, onClick: showMoreClickHandler },
+            makeTitle(topic, anyPinOrHiddenIconClass),
+            excerpt),
+          anyThumbnails),
+        r.td({ className: 's_F_Ts_T_CN' }, categoryName),
+        r.td({ className: 's_F_Ts_T_Avs' }, userAvatars),
         r.td({ className: 'num dw-tpc-replies' }, topic.numPosts - 1),
         r.td({ className: 'num dw-tpc-activity', title: activityTitle }, activityAgo)));
         // skip for now:  r.td({ className: 'num dw-tpc-feelings' }, feelings)));  [8PKY25]
+    else return (
+      r.li({ className: 'esF_TsL_T e2eF_T' },
+        r.div({ className: 'esF_TsL_T_Title e2eTopicTitle' },
+          makeTitle(topic, anyPinOrHiddenIconClass)),
+        r.div({ className: 'esF_TsL_T_NumRepls' },
+          topic.numPosts - 1, r.span({ className: 'icon-comment-empty' })),
+        excerpt,
+        r.div({ className: 'esF_TsL_T_Row2' },
+          r.div({ className: 'esF_TsL_T_Row2_Users' }, userAvatars),
+          r.div({ className: 'esF_TsL_T_Row2_Cat' },
+            r.span({ className: 'esF_TsL_T_Row2_Cat_Expl' }, "in: "), categoryName),
+          r.span({ className: 'esF_TsL_T_Row2_When' },
+            prettyLetterTimeAgo(topic.bumpedAtMs || topic.createdAtMs))),
+          anyThumbnails));
   }
 });
 
 
+function topic_mediaThumbnailUrls(topic: Topic): string[] {
+  let bodyUrls = topic.firstImageUrls || [];
+  let allUrls = bodyUrls.concat(topic.popularRepliesImageUrls || []);
+  let noGifs = _.filter(allUrls, (url) => url.toLowerCase().indexOf('.gif') === -1);
+  return _.uniq(noGifs);
+}
 
-var ForumCategoriesComponent = React.createClass(<any> {
+
+var LoadAndListCategoriesComponent = React.createClass(<any> {
   getInitialState: function() {
     return {};
   },
@@ -1056,7 +1233,8 @@ var ForumCategoriesComponent = React.createClass(<any> {
   },
 
   loadCategories: function(props) {
-    debiki2.Server.loadForumCategoriesTopics(this.props.pageId, props.location.query.filter,
+    var store: Store = props.store;
+    debiki2.Server.loadForumCategoriesTopics(store.pageId, props.location.query.filter,
         (categories: Category[]) => {
       if (this.ignoreServerResponse) return;
       this.setState({ categories: categories });
@@ -1120,24 +1298,28 @@ var CategoryRow = createComponent({
             r.span({ className: 'topic-details' },
               r.span({ title: numReplies + " replies" },
                 numReplies, r.span({ className: 'icon-comment-empty' })),
-              prettyLetterTimeAgo(topic.bumpedEpoch || topic.createdEpoch)))));
+              prettyLetterTimeAgo(topic.bumpedAtMs || topic.createdAtMs)))));
     });
 
     // This will briefly highlight a newly created category.
     var isNewClass = category.slug === store.newCategorySlug ?
       ' esForum_cats_cat-new' : '';
 
+    let isDeletedClass = category.isDeleted ? ' s_F_Cs_C-Dd' : '';
+    let isDeletedText = category.isDeleted ?
+        r.small({}, " (deleted)") : null;
+
     var isDefault = category.isDefaultCategory && isStaff(me) ?
         r.small({}, " (default category)") : null;
 
     return (
-      r.tr({ className: 'esForum_cats_cat' + isNewClass },
+      r.tr({ className: 'esForum_cats_cat' + isNewClass + isDeletedClass },
         r.td({ className: 'forum-info' }, // [rename] to esForum_cats_cat_meta
           r.div({ className: 'forum-title-wrap' },
             Link({ to: {
                 pathname: store.pagePath.value + RoutePathLatest + '/' + this.props.category.slug,
                 query: this.props.location.query }, className: 'forum-title' },
-              category.name, isDefault)),
+              category.name, isDefault), isDeletedText),
           r.p({ className: 'forum-description' }, category.description)),
         r.td({},  // class to esForum_cats_cat_topics?
           r.table({ className: 'topic-table-excerpt table table-condensed' },
@@ -1215,6 +1397,10 @@ function makeTitle(topic: Topic, className: string) {
   else if (topic.pageRole === PageRole.MindMap) {
     tooltip = "This is a mind map";
     title = r.span({}, r.span({ className: 'icon-sitemap' }), title);
+  }
+  else if (topic.pageRole === PageRole.FormalMessage) {
+    tooltip = "A private message";
+    title = r.span({}, r.span({ className: 'icon-mail' }), title);
   }
   else {
     title = r.span({}, r.span({ className: 'icon-comment-empty' }), title);

@@ -124,9 +124,9 @@
   content: '#';
   font-size: 125%;
   position: relative;
-  top: 1ex;
+  top: 2px;
   width: auto;
-  padding: 0 1ex 0 0;
+  padding: 0;
 
 
 // Twitter Bootstrap
@@ -226,6 +226,11 @@ input, textarea {
 // older modals still being in the foreground because their content z-index is 1050).
 .modal-backdrop
   z-index: 1050;
+
+// Scrollbars appear sometimes although not needed, in the editor dialog, when full screen,
+// and opening the category dropdown. (Sep 2016)
+.modal.fade.in
+  overflow: auto;
 
 .dropdown-menu > li
   margin: 0 5px;

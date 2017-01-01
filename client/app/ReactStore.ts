@@ -21,6 +21,7 @@
 /// <reference path="prelude.ts" />
 /// <reference path="utils/utils.ts" />
 /// <reference path="../typedefs/lodash/lodash.d.ts" />
+/// <reference path="../typedefs/eventemitter2/eventemitter2.d.ts" />
 
 
 /* This Flux store is perhaps a bit weird, not sure. I'll switch to Redux or
@@ -30,17 +31,16 @@
  */
 
 //------------------------------------------------------------------------------
-   module debiki2 {
+   namespace debiki2 {
 //------------------------------------------------------------------------------
 
 // DefinitelyTyped has defined EventEmitter2 in the wrong module? Unusable when
 // not using AMD/CommonJS, see https://github.com/borisyankov/DefinitelyTyped/issues/3075.
-var EventEmitter2: any = window['EventEmitter2'];
 
 var ChangeEvent = 'ChangeEvent';
 var $html = $('html');
 
-export var ReactStore = new EventEmitter2();
+export var ReactStore: any = new EventEmitter2();
 
 // Avoid a harmless "possible EventEmitter memory leak detected" warning.
 ReactStore.setMaxListeners(20);
@@ -191,7 +191,7 @@ ReactDispatcher.register(function(payload) {
 
     case ReactActions.actionTypes.ShowForumIntro:
       store.hideForumIntro = !action.visible;
-      localStorage.setItem('hideForumIntro', action.visible ? 'false' : 'true');
+      putInLocalStorage('hideForumIntro', action.visible ? 'false' : 'true');
       if (store.hideForumIntro) $html.addClass('dw-hide-forum-intro');
       else $html.removeClass('dw-hide-forum-intro');
       break;
@@ -229,7 +229,7 @@ ReactDispatcher.register(function(payload) {
       break;
 
     case ReactActions.actionTypes.ShowPost:
-      showPost(action.postId, action.showChildrenToo);
+      showPostNr(action.postNr, action.showChildrenToo);
       break;
 
     case ReactActions.actionTypes.SetWatchbar:
@@ -363,6 +363,10 @@ ReactStore.activateMyself = function(anyNewMe: Myself) {
   store.userSpecificDataAdded = true;
   store.now = new Date().getTime();
 
+  setTimeout(function() {
+    $html.addClass('e2eMyDataAdded');
+  }, 1);
+
   var newMe = anyNewMe;
   if (!newMe) {
     // For now only. Later on, this data should be kept server side instead?
@@ -392,6 +396,10 @@ ReactStore.activateMyself = function(anyNewMe: Myself) {
   // Show the user's own unapproved posts, or all, for admins.
   _.each(store.me.unapprovedPosts, (post: Post) => {
     updatePost(post);
+  });
+
+  _.each(store.me.unapprovedPostAuthors, (author: BriefUser) => {
+    store.usersByIdBrief[author.id] = author;
   });
 
   if (_.isArray(store.topics)) {
@@ -738,7 +746,7 @@ function collapseTree(post: Post) {
 }
 
 
-function showPost(postNr: PostNr, showChildrenToo?: boolean) {
+function showPostNr(postNr: PostNr, showChildrenToo?: boolean) {
   var post = store.allPosts[postNr];
   if (showChildrenToo) {
     uncollapsePostAndChildren(post);
@@ -805,8 +813,8 @@ function findTopLevelCommentIds(allPosts): number[] {
  */
 function sortPostIdsInPlaceBestFirst(postIds: PostNr[], allPosts: { [id: number]: Post }) {
   postIds.sort((idA: number, idB: number) => {
-    var postA = allPosts[idA];
-    var postB = allPosts[idB];
+    var postA: Post = allPosts[idA];
+    var postB: Post = allPosts[idB];
 
     // Perhaps the server shouldn't include deleted comments in the children list?
     // Is that why they're null sometimes? COULD try to find out
@@ -839,9 +847,9 @@ function sortPostIdsInPlaceBestFirst(postIds: PostNr[], allPosts: { [id: number]
 
     // Place multireplies after normal replies. See Post.scala.
     if (postA.multireplyPostIds.length && postB.multireplyPostIds.length) {
-      if (postA.createdAt < postB.createdAt)
+      if (postA.createdAtMs < postB.createdAtMs)
         return -1;
-      if (postA.createdAt > postB.createdAt)
+      if (postA.createdAtMs > postB.createdAtMs)
         return +1;
     }
     else if (postA.multireplyPostIds.length) {
@@ -894,9 +902,9 @@ function sortPostIdsInPlaceBestFirst(postIds: PostNr[], allPosts: { [id: number]
     // In Scala, a certain sortWith function is used, but it wants a Bool from the comparison
     // function, not a +-1 or 0 number. True means "should be sorted before".
     // But return 0 instead here to indicate that sort order doesn't matter.
-    if (postA.createdAt < postB.createdAt)
+    if (postA.createdAtMs < postB.createdAtMs)
       return -1;
-    else if (postA.createdAt > postB.createdAt)
+    else if (postA.createdAtMs > postB.createdAtMs)
       return +1;
     else
       return 0;
@@ -967,13 +975,23 @@ function patchTheStore(storePatch: StorePatch) {
 
   if (storePatch.me) {
     // [redux] modifying the store in place, again.
-    store.me = <Myself> _.extend(store.me || {}, storePatch.me);
+    store.me = <Myself> _.assign(store.me || {}, storePatch.me);
+  }
+
+  if (storePatch.categories) {
+    // [redux] modifying the store in place, again.
+    // Hmm what if the patch contains fever categories? Currently (2016-12), won't happen, though.
+    store.categories = storePatch.categories;
   }
 
   if (storePatch.tagsStuff) {
     // [redux] modifying the store in place, again.
-    store.tagsStuff = _.extend(store.tagsStuff || {}, storePatch.tagsStuff);
+    store.tagsStuff = _.assign(store.tagsStuff || {}, storePatch.tagsStuff);
   }
+
+  _.each(storePatch.usersBrief || [], (user: BriefUser) => {
+    store.usersByIdBrief[user.id] = user;
+  });
 
   // Highligt pages with new posts, in the watchbar.
   // And find out if some post was moved to elsewhere.
@@ -1014,17 +1032,21 @@ function patchTheStore(storePatch: StorePatch) {
   }
 
   var storePatchPageVersion = storePatch.pageVersionsByPageId[store.pageId];
-  if (!storePatchPageVersion || storePatchPageVersion <= store.pageVersion) {
-    // The store includes these changes already.
+  if (!storePatchPageVersion || storePatchPageVersion < store.pageVersion) {
+    // These changes are old, might be out-of-date, ignore.
     // COULD rename .usersBrief to .authorsBrief so it's apparent that they're related
     // to the posts, and that it's ok to ignore them if the posts are too old.
     return;
   }
-  store.pageVersion = storePatchPageVersion;
+  else if (storePatchPageVersion === store.pageVersion) {
+    // We might be loading the text of a hidden/unapproved comment, in order to show it.
+    // So although store & patch page versions are the same, proceed with updating
+    // any posts below.
+  }
+  else {
+    store.pageVersion = storePatchPageVersion;
+  }
 
-  _.each(storePatch.usersBrief || [], (user: BriefUser) => {
-    store.usersByIdBrief[user.id] = user;
-  });
   var posts = storePatch.postsByPageId[store.pageId];
   _.each(posts || [], (post: Post) => {
     updatePost(post);
@@ -1035,7 +1057,9 @@ function patchTheStore(storePatch: StorePatch) {
   // (The server doesn't know exactly which page we're looking at — perhaps we have many
   // browser tabs open, for example.)
   // COULD wait with marking it as seen until the user shows s/he is still here.
-  Server.markCurrentPageAsSeen();
+  if (store.me.isAuthenticated) {
+    Server.markCurrentPageAsSeen();
+  }
 }
 
 
@@ -1142,6 +1166,7 @@ function makeStranger(): Myself {
 
     votes: {},
     unapprovedPosts: {},
+    unapprovedPostAuthors: [],
     postIdsAutoReadLongAgo: [],
     postIdsAutoReadNow: [],
     marksByPostId: {},

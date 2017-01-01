@@ -34,40 +34,41 @@ object ApplicationBuild extends Build {
   }
 
 
-  lazy val debikiCore =
-    Project("debiki-core", file("modules/debiki-core"))
+  // Stuff shared between <repo-root>/app/ and <repo-root>/modules/ed-dao-rdb.
+  lazy val edCore =
+    Project("ed-core", file("modules/ed-core"))
 
-  lazy val debikiTckDao =
-    (Project("debiki-tck-dao", file("modules/debiki-tck-dao"))
-    dependsOn debikiCore)
-
-  lazy val debikiDaoRdb =
-    (Project("debiki-dao-rdb", file("modules/debiki-dao-rdb"))
-    dependsOn(debikiCore, debikiTckDao % "test"))
+  // ed = EffectiveDiscussions, dao = Database Access Object, rdb = Relational DataBase (PostgreSQL)
+  lazy val edDaoRdb =
+    (Project("ed-dao-rdb", file("modules/ed-dao-rdb"))
+    dependsOn edCore)
 
 
   val appDependencies = Seq(
+    // Gzip filter.
     play.sbt.Play.autoImport.filters,
     // OpenAuth and OpenID etc Authentication.
-    "com.mohiva" %% "play-silhouette" % "3.0.5",
+    "com.mohiva" %% "play-silhouette" % "4.0.0",
+    "com.mohiva" %% "play-silhouette-crypto-jca" % "4.0.0",
+    // ? "com.mohiva" %% "play-silhouette-password-bcrypt" % "4.0.0",
     // PostgreSQL JDBC client driver
     // see: http://mvnrepository.com/artifact/org.postgresql/postgresql/
     "org.postgresql" % "postgresql" % "9.4.1208",  // there's no 9.5 right now
     // HikariCP — "A solid high-performance JDBC connection pool at last"
-    "com.zaxxer" % "HikariCP" % "2.4.7",
-    // We use both a in-the-JVM-memory cache, and Redis:
+    "com.zaxxer" % "HikariCP" % "2.5.1",
+    // We use both an in-the-JVM-memory cache, and Redis:
     "com.github.ben-manes.caffeine" % "caffeine" % "2.2.6",
     "com.github.etaty" %% "rediscala" % "1.6.0",
     // Search engine, in https://mvnrepository.com.
     "org.elasticsearch" % "elasticsearch" % "5.0.0-alpha4",
     // ElasticSearch needs log4j
     "log4j" % "log4j" % "1.2.17",
-    "org.apache.commons" % "commons-email" % "1.3.3",
-    "com.google.guava" % "guava" % "13.0.1",
+    "org.apache.commons" % "commons-email" % "1.4",
+    "com.google.guava" % "guava" % "19.0",
     "org.jsoup" % "jsoup" % "1.9.2",
     // java.nio.file.Files.probeContentType doesn't work in Alpine Linux + JRE 8, so use
     // Tika instead. It'll be useful anyway later if indexing PDF or MS Word docs.
-    "org.apache.tika" % "tika-core" % "1.12",
+    "org.apache.tika" % "tika-core" % "1.13",
     "io.dropwizard.metrics" % "metrics-core" % "3.1.2",
     "nl.grons" %% "metrics-scala" % "3.5.2_a2.3",
     // JSR 305 is requried by Guava, at build time only (so specify "provided"
@@ -80,14 +81,14 @@ object ApplicationBuild extends Build {
     //              why-do-i-need-jsr305-to-use-guava-in-scala
     "com.google.code.findbugs" % "jsr305" % "1.3.9" % "provided",
     "org.mockito" % "mockito-all" % "1.9.0" % "test", // I use Mockito with Specs2...
-    "org.scalatest" %% "scalatest" % "2.2.4" % "test", // but prefer ScalaTest
-    "org.scalatestplus" %% "play" % "1.4.0-M4" % "test")
+    "org.scalatest" %% "scalatest" % "3.0.1" % "test", // but prefer ScalaTest
+    "org.scalatestplus.play" %% "scalatestplus-play" % "2.0.0-M1" % Test)
 
 
   val main = Project(appName, file(".")).enablePlugins(play.sbt.Play, BuildInfoPlugin)
     .settings(mainSettings: _*)
-    .dependsOn(debikiCore % "test->test;compile->compile", debikiDaoRdb)
-    .aggregate(debikiCore) // skip debikiDaoRdb for now, because old broken should-delete-them tests
+    .dependsOn(edCore % "test->test;compile->compile", edDaoRdb)
+    .aggregate(edCore) // skip debikiDaoRdb for now, because old broken should-delete-them tests
 
 
   def mainSettings = List(
@@ -106,6 +107,8 @@ object ApplicationBuild extends Build {
       ("Atlassian Releases" at "https://maven.atlassian.com/public/") +:
         Keys.resolvers.value,
 
+    play.sbt.routes.RoutesCompiler.autoImport.routesGenerator :=
+      play.routes.compiler.StaticRoutesGenerator,
 
     BuildInfoKeys.buildInfoPackage := "generatedcode",
     BuildInfoKeys.buildInfoOptions += BuildInfoOption.BuildTime,

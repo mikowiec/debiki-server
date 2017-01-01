@@ -42,7 +42,9 @@ import play.api.mvc.{Action => _}
 object ImportExportController extends mvc.Controller {
 
 
-  def importSiteJson = PostJsonAction(RateLimits.NoRateLimits, maxLength = 9999) { request =>
+  def importSiteJson(deleteOldSite: Option[Boolean]) =
+        PostJsonAction(RateLimits.NoRateLimits, maxLength = 9999) { request =>
+
     val okE2ePassword = hasOkE2eTestPassword(request.request)
     if (!okE2ePassword)
       throwForbidden("EsE5JKU2", "Importing sites is only allowed for e2e testing right now")
@@ -58,17 +60,24 @@ object ImportExportController extends mvc.Controller {
               invalid value combinations: ${ex.getMessage}""")
       }
 
-    val newSite = doImportSite(siteData, request)
+    val deleteOld = deleteOldSite.contains(true)
+    throwForbiddenIf(
+      deleteOld && siteData.site.hosts.exists(!_.hostname.startsWith(SiteHost.E2eTestPrefix)),
+      "EdE7GPK4F0", s"Can only overwrite hostnames that start with ${SiteHost.E2eTestPrefix}")
+
+    val newSite = doImportSite(siteData, request, deleteOldSite = deleteOld)
 
     Ok(Json.obj(
       "id" -> newSite.id,
+      "origin" -> (Globals.schemeColonSlashSlash + newSite.theCanonicalHost.hostname),
       "siteIdOrigin" -> Globals.siteByIdOrigin(newSite.id))) as JSON
   }
 
 
   private case class ImportSiteData(
     site: Site,
-    users: Seq[CompleteUser],
+    settings: SettingsToSave,
+    users: Seq[MemberInclDetails],
     pages: Seq[PageMeta],
     pagePaths: Seq[PagePathWithId],
     categories: Seq[Category],
@@ -78,9 +87,10 @@ object ImportExportController extends mvc.Controller {
   private def parseSiteJson(request: JsonPostRequest, isE2eTest: Boolean): ImportSiteData = {
     val bodyJson = request.body
 
-    val (siteMetaJson, membersJson, pagesJson, pathsJson, categoriesJson, postsJson) =
+    val (siteMetaJson, settingsJson, membersJson, pagesJson, pathsJson, categoriesJson, postsJson) =
       try {
         (readJsObject(bodyJson, "meta"),
+          readJsObject(bodyJson, "settings"),
           readJsArray(bodyJson, "members"),
           readJsArray(bodyJson, "pages"),
           readJsArray(bodyJson, "pagePaths"),
@@ -99,7 +109,9 @@ object ImportExportController extends mvc.Controller {
           throwBadRequest("EsE6UJM2", s"Invalid 'site' object json: ${ex.getMessage}")
       }
 
-    val users: Seq[CompleteUser] = membersJson.value.zipWithIndex map { case (json, index) =>
+    val settings = Settings2.settingsToSaveFromJson(settingsJson)
+
+    val users: Seq[MemberInclDetails] = membersJson.value.zipWithIndex map { case (json, index) =>
       readMemberOrBad(json, isE2eTest).getOrIfBad(errorMessage =>
           throwBadReq(
             "EsE0GY72", s"""Invalid user json at index $index in the 'users' list: $errorMessage,
@@ -134,16 +146,27 @@ object ImportExportController extends mvc.Controller {
               json: $json"""))
     }
 
-    ImportSiteData(siteToSave, users, pages, paths, categories, posts)
+    ImportSiteData(siteToSave, settings, users, pages, paths, categories, posts)
   }
 
 
-  def doImportSite(siteData: ImportSiteData, request: JsonPostRequest): Site = {
+  def doImportSite(siteData: ImportSiteData, request: JsonPostRequest, deleteOldSite: Boolean)
+        : Site = {
     for (page <- siteData.pages) {
       val path = siteData.pagePaths.find(_.pageId == page.pageId)
       throwBadRequestIf(path.isEmpty, "EsE5GKY2", o"""No PagePath included for page id
           '${page.pageId}'""")
     }
+
+    def isMissing(what: Option[Option[Any]]) = what.isEmpty || what.get.isEmpty || {
+      what.get.get match {
+        case s: String => s.trim.isEmpty
+        case _ => false
+      }
+    }
+
+    throwForbiddenIf(isMissing(siteData.settings.orgFullName),
+      "EdE7KB4W5", "No organization name specified")
 
     // COULD do this in the same transaction as the one below — then, would need a function
     // `transaction.continueWithSiteId(zzz)`?
@@ -159,6 +182,7 @@ object ImportExportController extends mvc.Controller {
       browserIdData = request.theBrowserIdData,
       isTestSiteOkayToDelete = true,
       skipMaxSitesCheck = true,
+      deleteOldSite = deleteOldSite,
       pricePlan = "Unknown")  // [4GKU024S]
 
     val newDao = Globals.siteDao(site.id)
@@ -167,9 +191,10 @@ object ImportExportController extends mvc.Controller {
       // forum page, and the forum page references to the root category.
       transaction.deferConstraints()
 
+      transaction.upsertSiteSettings(siteData.settings)
+
       siteData.users foreach { user =>
-        val newId = transaction.nextAuthenticatedUserId
-        transaction.insertAuthenticatedUser(user.copy(id = newId))
+        transaction.insertAuthenticatedUser(user)
       }
       siteData.pages foreach { pageMeta =>
         //val newId = transaction.nextPageId()
@@ -193,26 +218,38 @@ object ImportExportController extends mvc.Controller {
 
 
   def readSiteMeta(jsObject: JsObject): Site = {
-    val localHostname = readString(jsObject, "localHostname")
+    val name = readString(jsObject, "name")
+    val anyFullHostname = readOptString(jsObject, "fullHostname")
+    untestedIf(anyFullHostname.isDefined, "EsE5FK02", "fullHostname has never been used before")
+
+    def theLocalHostname = {
+      readOptString(jsObject, "localHostname") getOrElse {
+        throw new BadJsonException(s"Neither fullHostname nor localHostname specified [EsE2KF4Y8]")
+      }
+    }
+
     val siteStatusInt = readInt(jsObject, "status")
     val siteStatus = SiteStatus.fromInt(siteStatusInt) getOrElse {
       throwBadRequest("EsE6YK2W4", s"Bad site status int: $siteStatusInt")
     }
+
     val createdAtMs = readLong(jsObject, "createdAtMs")
+    val fullHostname = anyFullHostname.getOrElse(s"$theLocalHostname.${Globals.baseDomainNoPort}")
+
     Site(
       id = "?",
       status = siteStatus,
-      name = localHostname,
+      name = name,
       createdAt = When.fromMillis(createdAtMs),
       creatorIp = "0.0.0.0",
       creatorEmailAddress = readString(jsObject, "creatorEmailAddress"),
       embeddingSiteUrl = None,
       hosts = List(
-        SiteHost(localHostname, SiteHost.RoleCanonical)))
+        SiteHost(fullHostname, SiteHost.RoleCanonical)))
   }
 
 
-  def readMemberOrBad(jsValue: JsValue, isE2eTest: Boolean): CompleteUser Or ErrorMessage = {
+  def readMemberOrBad(jsValue: JsValue, isE2eTest: Boolean): MemberInclDetails Or ErrorMessage = {
     val jsObj = jsValue match {
       case x: JsObject => x
       case bad =>
@@ -231,7 +268,7 @@ object ImportExportController extends mvc.Controller {
     try {
       val passwordHash = readOptString(jsObj, "passwordHash")
       passwordHash.foreach(DebikiSecurity.throwIfBadPassword(_, isE2eTest))
-      Good(CompleteUser(
+      Good(MemberInclDetails(
         id = id,
         username = username,
         fullName = readOptString(jsObj, "fullName"),
@@ -239,13 +276,14 @@ object ImportExportController extends mvc.Controller {
         isApproved = readOptBool(jsObj, "isApproved"),
         approvedAt = readOptDateMs(jsObj, "approvedAtMs"),
         approvedById = readOptInt(jsObj, "approvedById"),
-        emailAddress = readString(jsObj, "emailAddress"),
+        emailAddress = readString(jsObj, "emailAddress").trim,
         emailNotfPrefs = EmailNotfPrefs.Receive, // [readlater]
         emailVerifiedAt = readOptDateMs(jsObj, "emailVerifiedAtMs"),
         emailForEveryNewPost = readOptBool(jsObj, "emailForEveryNewPost") getOrElse false,
         passwordHash = passwordHash,
-        country = readOptString(jsObj, "country") getOrElse "",
-        website = readOptString(jsObj, "website") getOrElse "",
+        country = readOptString(jsObj, "country"),
+        website = readOptString(jsObj, "website"),
+        about = readOptString(jsObj, "about"),
         tinyAvatar = None, // [readlater]
         smallAvatar = None, // [readlater]
         mediumAvatar = None, // [readlater]
@@ -443,9 +481,9 @@ object ImportExportController extends mvc.Controller {
         closedStatus = closedStatusDefaultOpen,
         closedAt = readOptDateMs(jsObj, "closedAtMs"),
         closedById = readOptInt(jsObj, "closedById"),
-        hiddenAt = readOptDateMs(jsObj, "hiddenAtMs"),
-        hiddenById = readOptInt(jsObj, "hiddenById"),
-        //hiddenReason: ?
+        bodyHiddenAt = readOptDateMs(jsObj, "hiddenAtMs"),
+        bodyHiddenById = readOptInt(jsObj, "hiddenById"),
+        bodyHiddenReason = readOptString(jsObj, "hiddenReason"),
         deletedStatus = deletedStatusDefaultOpen,
         deletedAt = readOptDateMs(jsObj, "deletedAtMs"),
         deletedById = readOptInt(jsObj, "deletedById"),

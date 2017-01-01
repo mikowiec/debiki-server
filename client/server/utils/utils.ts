@@ -11,6 +11,10 @@ export function getFromLocalStorage(key): string {
   return null;
 }
 
+export function getFromSessionStorage(key): string {
+  return null;
+}
+
 export function removeFromLocalStorage(key) {
   throw new Error('removeFromLocalStorage called server side [DwE8PUMK2]');
 }
@@ -21,6 +25,14 @@ export function getPageScrollableRect(): ClientRect {
 
 export function getPageRect(): ClientRect {
   throw new Error('getPageRect called server side [DwE7UYKW2]');
+}
+
+export function reactGetRefRect(ref): Rect {
+  throw new Error('reactGetRefRect called server side [DwE7GDY20C]');
+}
+
+export function cloneRect(rect: ClientRect | Rect): Rect {
+  throw new Error('cloneRect called server side [DwE8PK0GW1]');
 }
 
 export function event_isEnter(event) {

@@ -20,7 +20,7 @@ package controllers
 import com.debiki.core._
 import com.debiki.core.Prelude._
 import debiki._
-import debiki.antispam.AntiSpam
+import ed.server.spam.SpamChecker
 import debiki.dao.SiteDao
 import debiki.DebikiHttp._
 import io.efdi.server.http._
@@ -104,9 +104,9 @@ object LoginWithPasswordController extends mvc.Controller {
     if (!isValidNonLocalEmailAddress(emailAddress))
       throwUnprocessableEntity("DwE80KFP2", "Bad email address")
 
-    Globals.antiSpam.detectRegistrationSpam(request, name = username, email = emailAddress) map {
+    Globals.spamChecker.detectRegistrationSpam(request, name = username, email = emailAddress) map {
         isSpamReason =>
-      AntiSpam.throwForbiddenIfSpam(isSpamReason, "DwE7KVF2")
+      SpamChecker.throwForbiddenIfSpam(isSpamReason, "EdE7KVF2_")
 
       // Password strength tested in createPasswordUserCheckPasswordStrong() below.
 
@@ -143,26 +143,54 @@ object LoginWithPasswordController extends mvc.Controller {
 
   val RedirectFromVerificationEmailOnly = "_RedirFromVerifEmailOnly_"
 
-  def sendEmailAddressVerificationEmail(user: Member, anyReturnToUrl: Option[String],
-        host: String, dao: SiteDao) {
+
+  def createEmailAddrVerifEmailLogDontSend(user: Member, anyReturnToUrl: Option[String],
+        host: String, dao: SiteDao): Email = {
+
     val returnToUrl = anyReturnToUrl match {
       case Some(url) => url.replaceAllLiterally(RedirectFromVerificationEmailOnly, "")
       case None => "/"
     }
-    val email = Email(
+    val returnToUrlEscapedHash = returnToUrl.replaceAllLiterally("#", "__dwHash__")
+    val emailId = Email.generateRandomId()
+
+    val emailAddrVerifUrl =
+      debiki.Globals.originOf(host) +
+        routes.LoginWithPasswordController.confirmEmailAddressAndLogin(
+          emailId, returnToUrlEscapedHash)
+
+    val email = Email.newWithId(
+      emailId,
       EmailType.CreateAccount,
       sendTo = user.email,
       toUserId = Some(user.id),
       subject = "Confirm your email address",
-      bodyHtmlText = (emailId: String) => {
+      bodyHtmlText =
         views.html.createaccount.createAccountLinkEmail(
           siteAddress = host,
           username = user.theUsername,
-          emailId = emailId,
-          returnToUrl = returnToUrl,
-          expirationTimeInHours = MaxAddressVerificationEmailAgeInHours).body
-      })
+          verificationUrl = emailAddrVerifUrl,
+          expirationTimeInHours = MaxAddressVerificationEmailAgeInHours).body)
+
     dao.saveUnsentEmail(email)
+
+    if (user.isOwner) {
+      play.api.Logger.info(i"""
+        |
+        |————————————————————————————————————————————————————————————
+        |Copy this site-owner-email-address-verification-URL into your web browser: [EdM5KF0W2]
+        |  $emailAddrVerifUrl
+        |————————————————————————————————————————————————————————————
+        |""")
+    }
+
+    email
+  }
+
+
+  def sendEmailAddressVerificationEmail(user: Member, anyReturnToUrl: Option[String],
+        host: String, dao: SiteDao) {
+    val email = createEmailAddrVerifEmailLogDontSend(user, anyReturnToUrl, host, dao)
     Globals.sendEmail(email, dao.siteId)
   }
 
@@ -188,7 +216,7 @@ object LoginWithPasswordController extends mvc.Controller {
         GetActionRateLimited(RateLimits.ConfirmEmailAddress, allowAnyone = true) { request =>
 
     val userId = finishEmailAddressVerification(confirmationEmailId, request)
-    val user = request.dao.loadUser(userId) getOrElse {
+    val user = request.dao.getUser(userId) getOrElse {
       throwInternalError("DwE7GJ0", "I've deleted the account")
     }
 
@@ -204,6 +232,7 @@ object LoginWithPasswordController extends mvc.Controller {
 
 
   private def finishEmailAddressVerification(emailId: String, request: ApiRequest[_]): UserId = {
+    SECURITY // don't let the same email verif url be used more than once?
     val email = request.dao.loadEmailById(emailId) getOrElse {
       throwForbidden("DwE7GJP03", "Link expired? Bad email id; email not found.")
     }

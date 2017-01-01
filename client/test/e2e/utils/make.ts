@@ -1,13 +1,16 @@
 /// <reference path="../test-types.ts"/>
 /// <reference path="../../../../modules/definitely-typed/lodash/lodash.d.ts"/>
 /// <reference path="../../../../modules/definitely-typed/node/node.d.ts"/>
+import settings = require('./settings');
+import log = require('./log-and-die');
 declare function require(...whatever): any;
 
 import _ = require('lodash');
 import assert = require('assert');
+import c = require('../test-constants');
 
 var DefaultCreatedAtMs = 1449198824000;
-var SystemUserId = -1;
+var SystemUserId = 1; // [commonjs]
 
 var nextPostId = 101;
 function getAndBumpNextPostId() {
@@ -15,15 +18,26 @@ function getAndBumpNextPostId() {
   return nextPostId - 1;
 }
 
-var emptySite: SiteData = {
+var nextUserId = 101;
+function getAndBumpNextUserId() {
+  nextUserId += 1;
+  return nextUserId - 1;
+}
+
+let localHostname = settings.localHostname || 'e2e-test-site';
+
+let emptySite: SiteData = {
   meta: {
     id: null,
-    localHostname: null,
-    creatorEmailAddress: "e2e-test-owner@ex.com",
+    name: localHostname + '-' + Date.now(),
+    localHostname: localHostname,
+    creatorEmailAddress: "e2e-test--owner@example.com",
     status: 2,
     createdAtMs: DefaultCreatedAtMs,
   },
-  settings: [],
+  settings: {
+    companyFullName: "E2E Test Org",
+  },
   groups: [],
   members: [],
   identities: [],
@@ -53,13 +67,14 @@ var make = {
 
   memberOwenOwner: function(): Member {
     return {
-      id: 101,
+      id: getAndBumpNextUserId(),
       username: "owen_owner",
       fullName: "Owen Owner",
       createdAtMs: DefaultCreatedAtMs,
-      emailAddress: "owen-owner@ex.com",
+      emailAddress: "e2e-test--owen-owner@example.com",
       emailVerifiedAtMs: DefaultCreatedAtMs,
-      passwordHash: "cleartext:publicOwen",
+      passwordHash: "cleartext:publicOwen123",
+      password: "publicOwen123",
       isOwner: true,
       isAdmin: true,
     };
@@ -67,95 +82,115 @@ var make = {
 
   memberAdminAdam: function(): Member {
     return {
-      id: 201,
+      id: getAndBumpNextUserId(),
       username: "admin_adam",
       fullName: "Admin Adam",
       createdAtMs: DefaultCreatedAtMs,
       emailAddress: "admin-adam@ex.com",
       emailVerifiedAtMs: DefaultCreatedAtMs,
-      passwordHash: "cleartext:publicAdam",
+      passwordHash: "cleartext:publicAdam123",
+      password: "publicAdam123",
       isAdmin: true,
     };
   },
 
   memberAdminAlice: function(): Member {
     return {
-      id: 201,
+      id: getAndBumpNextUserId(),
       username: "admin_alice",
       fullName: "Admin Alice",
       createdAtMs: DefaultCreatedAtMs,
       emailAddress: "admin-alice@ex.com",
       emailVerifiedAtMs: DefaultCreatedAtMs,
-      passwordHash: "cleartext:publicAlice",
+      passwordHash: "cleartext:publicAlice123",
+      password: "publicAlice123",
       isAdmin: true,
     };
   },
 
   memberModeratorModya: function(): Member {
     return {
-      id: 201,
+      id: getAndBumpNextUserId(),
       username: "mod_modya",
       fullName: "Mod Modya",
       createdAtMs: DefaultCreatedAtMs,
       emailAddress: "mod-modya@ex.com",
       emailVerifiedAtMs: DefaultCreatedAtMs,
-      passwordHash: "cleartext:publicModya",
+      passwordHash: "cleartext:publicModya123",
+      password: "publicModya123",
       isModerator: true,
     };
   },
 
   memberModeratorMons: function(): Member {
     return {
-      id: 201,
+      id: getAndBumpNextUserId(),
       username: "mod_mons",
       fullName: "Mod Mons",
       createdAtMs: DefaultCreatedAtMs,
       emailAddress: "mod-mons@ex.com",
       emailVerifiedAtMs: DefaultCreatedAtMs,
-      passwordHash: "cleartext:publicMons",
+      passwordHash: "cleartext:publicMons123",
+      password: "publicMons123",
       isModerator: true,
+    };
+  },
+
+  memberMaja: function(): Member {
+    return {
+      id: getAndBumpNextUserId(),
+      username: "maja",
+      fullName: "Maja Gräddnos",
+      createdAtMs: DefaultCreatedAtMs,
+      emailAddress: "e2e-test--maja@example.com",
+      emailVerifiedAtMs: DefaultCreatedAtMs,
+      passwordHash: "cleartext:publicMaja123",
+      password: "publicMaja123",
     };
   },
 
   memberMaria: function(): Member {
     return {
-      id: 201,
+      id: getAndBumpNextUserId(),
       username: "maria",
       fullName: "Maria",
       createdAtMs: DefaultCreatedAtMs,
-      emailAddress: "maria@ex.com",
+      emailAddress: "e2e-test--maria@example.com",
       emailVerifiedAtMs: DefaultCreatedAtMs,
-      passwordHash: "cleartext:publicMaria",
+      passwordHash: "cleartext:publicMaria123",
+      password: "publicMaria123",
     };
   },
 
   memberMichael: function(): Member {
     return {
-      id: 201,
+      id: getAndBumpNextUserId(),
       username: "michael",
       fullName: "Michael",
       createdAtMs: DefaultCreatedAtMs,
-      emailAddress: "michael@ex.com",
+      emailAddress: "e2e-test--michael@example.com",
       emailVerifiedAtMs: DefaultCreatedAtMs,
-      passwordHash: "cleartext:publicMichael",
+      passwordHash: "cleartext:publicMichael123",
+      password: "publicMichael123",
     };
   },
 
   memberMallory: function(): Member {
     return {
-      id: 201,
+      id: getAndBumpNextUserId(),
       username: "mallory",
       fullName: "Mallory",
       createdAtMs: DefaultCreatedAtMs,
       emailAddress: "mallory@ex.com",
       emailVerifiedAtMs: DefaultCreatedAtMs,
-      passwordHash: "cleartext:publicMallory",
+      passwordHash: "cleartext:publicMallory123",
+      password: "publicMallory123",
     };
   },
 
   guestGunnar: function(): TestGuest {
     return {
-      id: 201,
+      id: -10,
       fullName: "Guest Gunnar",
       createdAtMs: DefaultCreatedAtMs,
       emailAddress: "guest-gunnar@ex.com",
@@ -165,7 +200,7 @@ var make = {
 
   guestGreta: function(): TestGuest {
     return {
-      id: 201,
+      id: -11,
       fullName: "Guest Greta",
       createdAtMs: DefaultCreatedAtMs,
       emailAddress: "guest-greta@ex.com",
@@ -198,6 +233,15 @@ var make = {
     }
   },
 
+  pagePath: function(pageId: PageId, folder: string, showId: boolean, slug?: string): PagePathWithId {
+    return {
+      folder: folder,
+      pageId: pageId,
+      showId: showId,
+      slug: slug || '',
+    };
+  },
+
   rootCategoryWithIdFor: function(id: CategoryId, forumPage: Page): TestCategory {
     var category = make.categoryWithIdFor(id, forumPage);
     category.name = "(Root Category)";  // in Scala too [7UKPX5]
@@ -216,7 +260,7 @@ var make = {
       position: undefined,
       description: undefined,
       newTopicTypes: undefined,
-      defaultTopicType: 12, // PageRole.Discussion,
+      defaultTopicType: c.TestPageRole.Discussion,
       createdAtMs: forumPage.createdAtMs,
       updatedAtMs: forumPage.updatedAtMs,
       hideInForum: false,
@@ -260,7 +304,7 @@ var make = {
       approvedSource: values.approvedSource,
       approvedHtmlSanitized: approvedHtmlSanitized,
       approvedAtMs: values.page.createdAtMs,
-      approvedById: -1, // [commonjs]
+      approvedById: SystemUserId,
       approvedRevNr: 1,
       currRevSourcePatch: undefined,
       currRevNr: 1,
@@ -279,18 +323,31 @@ var make = {
     };
   },
 
-  forumOwnedByOwen: function(namePrefix: string): SiteData {
-    var site: SiteData = make.emptySiteOwnedByOwen();
-    site.meta.localHostname = namePrefix + Date.now();
+  findForumPage: function(pages: Page[]): Page {
+    for (let i = 0; i < pages.length; ++i) {
+      let page = pages[i];
+      if (page.role === c.TestPageRole.Forum)
+        return page;
+    }
+    log.die('EdE2KW055');
+  },
+
+  forumOwnedByOwen: function(name: string, options?): SiteData {
+    let site: SiteData = make.emptySiteOwnedByOwen();
+    let now = Date.now();
+    site.meta.localHostname = site.meta.localHostname || 'e2e-test-' + now;
+    site.meta.name = 'e2e-test-' + name + '-' + now;
+
+    options = options || {};
 
     // Dupl test code below [6FKR4D0]
     var rootCategoryId = 1;
 
     var forumPage = make.page({
       id: 'fmp',
-      role: <PageRole> 7,  // [commonjs] PageRole.Forum
+      role: c.TestPageRole.Forum,
       categoryId: rootCategoryId,
-      authorId: -1,    // [commonjs] SystemUserId   [5KGEP02]
+      authorId: 1,    // [commonjs] SystemUserId
     });
     site.pages.push(forumPage);
 
@@ -300,8 +357,8 @@ var make = {
     site.posts.push(make.post({
       page: forumPage,
       nr: 0,
-      approvedSource: "Forum Title",
-      approvedHtmlSanitized: "Forum Title",
+      approvedSource: options.title || "Forum Title",
+      approvedHtmlSanitized: options.title || "Forum Title",
     }));
     site.posts.push(make.post({
       page: forumPage,

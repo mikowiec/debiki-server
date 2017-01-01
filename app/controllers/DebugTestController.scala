@@ -17,15 +17,15 @@
 
 package controllers
 
-import java.lang.management.ManagementFactory
-
 import akka.pattern.ask
 import com.debiki.core._
 import com.debiki.core.Prelude._
 import debiki.{ReactRenderer, RateLimits, Globals}
 import debiki.DebikiHttp._
 import io.efdi.server.http._
+import java.lang.management.ManagementFactory
 import java.{util => ju, io => jio}
+import javax.inject.Inject
 import play.api._
 import play.api.libs.json._
 import play.{api => p}
@@ -40,19 +40,24 @@ import scala.util.Try
 
 /** Intended for troubleshooting, via the browser, and helps running End-to-End tests.
   */
-object DebugTestController extends mvc.Controller {
+class DebugTestController @Inject() extends mvc.Controller {
 
 
   /** If a JS error happens in the browser, it'll post the error message to this
     * endpoint, which logs it, so we'll get to know about client side errors.
     */
-  def logBrowserError = PostJsonAction(RateLimits.BrowserError, maxLength = 1000) { request =>
-    val errorMessage = request.body.toString()
-    p.Logger.warn(o"""Browser error: $errorMessage,
+  def logBrowserErrors = PostJsonAction(RateLimits.BrowserError, maxLength = 10000) { request =>
+    val allErrorMessages = request.body.as[Seq[String]]
+    // If there are super many errors, perhaps all of them is the same error. Don't log too many.
+    val firstErrors = allErrorMessages take 20
+    firstErrors foreach { message =>
+      p.Logger.warn(o"""Browser error,
       ip: ${request.ip},
       user: ${request.user.map(_.id)},
       site: ${request.siteId}
+      message: $message
       [DwE4KF6]""")
+    }
     Ok
   }
 
@@ -188,29 +193,34 @@ object DebugTestController extends mvc.Controller {
   }
 
 
-  def showLastE2eTestEmailSent(sentTo: String) = ExceptionAction.async(empty) { request =>
+  def showLastE2eTestEmailSent(siteId: SiteId, sentTo: String) = ExceptionAction.async(empty) {
+        request =>
+    SECURITY // COULD add and check an e2e password. Or rate limits.
+
+    if (!Email.isE2eTestEmailAddress(sentTo))
+      throwForbidden("DwEZ4GKE7", "Not an end-to-end test email address")
+
     val timeout = request.queryString.get("timeoutMs") match {
       case Some(values: Seq[String]) if values.nonEmpty =>
         val value = Try(values.head.toInt) getOrElse throwBadArgument("DwE4WK55", "timeoutMs")
         if (value <= 0) throwBadRequest("DwE6KGU3", "timeoutMs is <= 0")
         value millis
       case None =>
-        5000 millis
+        // lower than the e2e test wait-for-timeout,
+        // but high in comparison to the notifier [5KF0WU2T4]
+        10 seconds
     }
 
-    SECURITY // COULD add and check an e2e password.
-    if (!sentTo.startsWith("e2e-test--") || !sentTo.endsWith("@example.com"))
-      throwForbidden("DwE5KFW2", "Not an end-to-end test email address")
-
     val futureReply: Future[Any] =
-      Globals.endToEndTestMailer.ask("GetEndToEndTestEmail", sentTo)(akka.util.Timeout(timeout))
+      Globals.endToEndTestMailer.ask(
+          "GetEndToEndTestEmail", s"$siteId:$sentTo")(akka.util.Timeout(timeout))
 
-    futureReply.flatMap({
-      case futureEmail: Future[Email] =>
+    val result: Future[p.mvc.Result] = futureReply.flatMap({
+      case futureEmail: Future[_] =>
         val scheduler = p.libs.concurrent.Akka.system.scheduler
         val futureTimeout = akka.pattern.after(timeout, scheduler)(
           failed(ResultException(InternalErrorResult(
-            "DwE5KGU0", "Timeout waiting for an email to get sent to that address"))))
+            "EdE5KSA0", "Timeout waiting for an email to get sent to that address"))))
 
         firstCompletedOf(Seq(futureEmail, futureTimeout)).map({
           case email: Email =>
@@ -232,6 +242,8 @@ object DebugTestController extends mvc.Controller {
       case throwable: Throwable =>
         InternalErrorResult("DwE4KFE2", "Timeout waiting for email: " + throwable.toString)
     })
+
+    result
   }
 
 }

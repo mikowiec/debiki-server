@@ -21,8 +21,9 @@ import com.debiki.core._
 import com.debiki.core.Prelude._
 import debiki._
 import debiki.DebikiHttp._
-import debiki.antispam.AntiSpam.throwForbiddenIfSpam
+import ed.server.spam.SpamChecker.throwForbiddenIfSpam
 import io.efdi.server.http._
+import javax.inject.Inject
 import play.api.libs.json._
 import play.api.mvc.Controller
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -34,7 +35,7 @@ import scala.util.Try
   * Each new empty site remembers an admin email address. When the site creator later
   * logs in with that email address, s/he becomes admin for the site.
   */
-object CreateSiteController extends Controller {
+class CreateSiteController @Inject() extends Controller {
 
   private val log = play.api.Logger
 
@@ -47,7 +48,7 @@ object CreateSiteController extends Controller {
   private val MinLocalHostnameLength = 6
 
 
-  def showPage(isTest: String) = GetAction { request =>
+  def showPage(isTest: String) = GetAction { request: GetRequest =>
     val isTestBool = Try(isTest.toBoolean).toOption getOrElse throwBadArgument("EsE5JUM2", "isTest")
     throwIfMayNotCreateSite(request, isTestBool)
 
@@ -83,7 +84,7 @@ object CreateSiteController extends Controller {
     if (!acceptTermsAndPrivacy)
       throwForbidden("DwE877FW2", "You need to accept the terms of use and privacy policy")
 
-    if (!isOkaySiteName(localHostname))
+    if (!Site.isOkayName(localHostname))
       throwForbidden("DwE5YU70", "Bad site name")
 
     if (localHostname.length < MinLocalHostnameLength && !hasOkForbiddenPassword(request))
@@ -112,11 +113,12 @@ object CreateSiteController extends Controller {
       case x => throwBadArgument("EsE7YKW28", "pricePlan", "not 0, 1 or 2")
     }
 
-    Globals.antiSpam.detectRegistrationSpam(request, name = localHostname,
+    Globals.spamChecker.detectRegistrationSpam(request, name = localHostname,
         email = emailAddress) map { isSpamReason =>
-      throwForbiddenIfSpam(isSpamReason, "DwE4KG28")
+      throwForbiddenIfSpam(isSpamReason, "EdE4KG28")
 
       val hostname = s"$localHostname.${Globals.baseDomainNoPort}"
+      val deleteOldSite = isTestSiteOkayToDelete && hostname.startsWith(SiteHost.E2eTestPrefix)
 
       val goToUrl: String =
         try {
@@ -126,7 +128,7 @@ object CreateSiteController extends Controller {
             creatorId = request.user.map(_.id) getOrElse UnknownUserId,
             browserIdData = request.theBrowserIdData, organizationName = organizationName,
             isTestSiteOkayToDelete = isTestSiteOkayToDelete, skipMaxSitesCheck = okE2ePassword,
-            pricePlan = pricePlan)
+            deleteOldSite = deleteOldSite, pricePlan = pricePlan)
           Globals.originOf(hostname)
         }
         catch {
@@ -149,18 +151,8 @@ object CreateSiteController extends Controller {
   }
 
 
-  /** Must be a valid host name, not too long or too short (less than 6 chars),
-    * no '.' and no leading or trailing '-'. See test suite in SiteCreatorSpec.
-    */
-  def isOkaySiteName(name: String): Boolean = {
-    OkWebsiteNameRegex matches name
-  }
-
-  private val OkWebsiteNameRegex = """[a-z][a-z0-9\-]{0,38}[a-z0-9]""".r
-  import ed.server.Whatever
-
-
   private def throwIfMayNotCreateSite(request: DebikiRequest[_], isTest: Boolean) {
+    import ed.server.Whatever
     if (isTest && (
         Globals.anyCreateTestSiteHostname.contains(Whatever) ||
         Globals.anyCreateTestSiteHostname.contains(request.hostname))) {

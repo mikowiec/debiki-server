@@ -16,9 +16,13 @@
  */
 
 /// <reference path="../../typedefs/react/react.d.ts" />
+/// <reference path="../../typedefs/keymaster/keymaster.d.ts" />
 /// <reference path="../plain-old-javascript.d.ts" />
 /// <reference path="../prelude.ts" />
 /// <reference path="../model.ts" />
+/// <reference path="../rules.ts" />
+/// <reference path="../widgets.ts" />
+/// <reference path="../utils/react-utils.ts" />
 
 //------------------------------------------------------------------------------
    module debiki2.utils {
@@ -26,9 +30,9 @@
 
 var r = React.DOM;
 var $: JQueryStatic = debiki.internal.$;
-var ReactBootstrap: any = window['ReactBootstrap'];
-var Button = reactCreateFactory(ReactBootstrap.Button);
-var Modal = reactCreateFactory(ReactBootstrap.Modal);
+var keymaster: Keymaster = window['keymaster'];
+declare var ReactBootstrap: any;  // lazy loaded
+declare var Modal;                // lazy loaded
 
 
 export var ModalDropdownButton = createComponent({
@@ -39,6 +43,15 @@ export var ModalDropdownButton = createComponent({
       buttonY: -1,
       modalCreated: false,
     };
+  },
+
+  componentDidMount: function() {
+    keymaster('escape', this.props.onClose);
+    $(this.refs.input).focus();
+  },
+
+  componentWillUnmount: function() {
+    keymaster.unbind('escape', 'all');
   },
 
   openDropdown: function() {
@@ -71,6 +84,7 @@ export var ModalDropdownButton = createComponent({
             onHide: this.closeDropdown, atX: state.buttonX, atY: state.buttonY,
             className: props.dialogClassName, id: props.dialogId,
             allowFullWidth: props.allowFullWidth, ref: 'dropdownModal',
+            showCloseButton: props.showCloseButton,
             onContentClick: props.closeOnClick === false ? null : this.closeDropdown },
           props.children);
     }
@@ -91,6 +105,14 @@ export var ModalDropdownButton = createComponent({
 export var DropdownModal = createComponent({
   getInitialState: function () {
     return {};
+  },
+
+  componentDidMount: function() {
+    Server.loadMoreScriptsBundle(() => {
+      ReactBootstrap = window['ReactBootstrap'];
+      Modal = reactCreateFactory(ReactBootstrap.Modal);
+      this.setState({ moreBundleLoaded: true });
+    })
   },
 
   componentDidUpdate: function() {
@@ -138,18 +160,39 @@ export var DropdownModal = createComponent({
   },
 
   render: function() {
+    if (!this.state.moreBundleLoaded)
+      return null;
+
     var content;
     if (this.props.show) {
-      var left = this.props.pullLeft ? this.props.atX : undefined;
-      var right = this.props.pullLeft ? undefined : 'calc(100% - ' + this.props.atX + 'px)';
+      var closeButton = !this.props.showCloseButton ? null :
+        r.div({ className: 'esDropModal_CloseB esCloseCross', onClick: this.props.onHide });
+
+      // Try to remove props.atX & .pullLeft, use betweenX everywhere instead. CLEAN_UP
+      var atX = this.props.atX;
+      var atY = this.props.atY;
+      var pullLeft = this.props.pullLeft;
+
+      var rect: ClientRect = this.props.atRect;
+      if (rect) {
+        var windowMiddle = this.props.windowWidth / 2;
+        var spaceLeft = windowMiddle - rect.left;
+        var spaceRight = rect.right - windowMiddle;
+        pullLeft = spaceLeft > spaceRight;
+        atX = pullLeft ? rect.left : rect.right;
+        atY = rect.bottom;
+      }
+
+      var left = pullLeft ? atX : undefined;
+      var right = pullLeft ? undefined : 'calc(100% - ' + atX + 'px)';
       var styles = {
         left: left,
         right: right,
-        top: this.props.atY,
+        top: atY,
       };
       content =
         r.div({ className: 'esDropModal_content ' + (this.props.className || ''), style: styles,
-            ref: 'content', onClick: this.props.onContentClick }, this.props.children);
+            ref: 'content', onClick: this.props.onContentClick }, closeButton, this.props.children);
     }
 
     var backdropStyle: any = { opacity: 0.08 };

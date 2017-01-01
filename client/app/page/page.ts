@@ -16,19 +16,14 @@
  */
 
 /// <reference path="../../typedefs/react/react.d.ts" />
-/// <reference path="../plain-old-javascript.d.ts" />
 /// <reference path="../prelude.ts" />
 /// <reference path="../utils/utils.ts" />
 /// <reference path="../utils/react-utils.ts" />
-/// <reference path="../dialogs.ts" />
 /// <reference path="../help/help.ts" />
-/// <reference path="../editor/title-editor.ts" />
-/// <reference path="../edit-history/edit-history-dialog.ts" />
 /// <reference path="../topbar/topbar.ts" />
-/// <reference path="../page-dialogs/wikify-dialog.ts" />
-/// <reference path="../page-dialogs/delete-post-dialog.ts" />
 /// <reference path="../help/help.ts" />
 /// <reference path="../model.ts" />
+/// <reference path="../rules.ts" />
 /// <reference path="discussion.ts" />
 /// <reference path="chat.ts" />
 /// <reference path="scroll-buttons.ts" />
@@ -38,23 +33,10 @@
 // The bug has supposedly been fixed in Java 8u40. Once I'm using that version,
 // remove `var exports = {};` from app/debiki/ReactRenderer.scala.
 //------------------------------------------------------------------------------
-  // module debiki2.renderer {
-module boo {
-    export var buu = 'vovvar';
-};
+   namespace debiki2 {
 //------------------------------------------------------------------------------
 
-var MaxGuestId = -2; // place where?
-
-
-var React = window['React']; // TypeScript file doesn't work
-var ReactDOM = window['ReactDOM'];
-var ReactDOMServer = window['ReactDOMServer'];
 var r = React.DOM;
-var reactCreateFactory = React['createFactory'];
-var ReactBootstrap: any = window['ReactBootstrap'];
-var ReactRouter = window['ReactRouter'];
-var Router = reactCreateFactory(ReactRouter.Router);
 
 
 var PageWithState = createComponent({
@@ -75,12 +57,43 @@ var PageWithState = createComponent({
 
 
 var Page = createComponent({
+  getInitialState: function() {
+    return {
+      useWideLayout: this.isPageWide(),
+    };
+  },
+
+  componentDidMount: function() {
+    // A tiny bit dupl code though, perhaps break out... what? a mixin? [5KFEWR7]
+    this.timerHandle = setInterval(this.checkSizeChangeLayout, 200);
+  },
+
+  componentWillUnmount: function() {
+    this.isGone = true;
+    clearInterval(this.timerHandle);
+  },
+
+  checkSizeChangeLayout: function() {
+    // Dupl code [5KFEWR7]
+    if (this.isGone) return;
+    var isWide = this.isPageWide();
+    if (isWide !== this.state.useWideLayout) {
+      this.setState({ useWideLayout: isWide });
+    }
+  },
+
+  isPageWide: function(): boolean {
+    return store_getApproxPageWidth(this.props) > UseWidePageLayoutMinWidth;
+  },
+
   render: function() {
     var store: Store = this.props;
-    var content = page_isChatChannel(store.pageRole) ?
-        debiki2.page.ChatMessages(this.props) : debiki2.page.TitleBodyComments(this.props);
+    var content = page_isChatChannel(store.pageRole)
+        ? debiki2.page.ChatMessages({ store: store })
+        : debiki2.page.TitleBodyComments({ store: store });
+    var compactClass = this.state.useWideLayout ? '' : ' esPage-Compact';
     return (
-      r.div({ className: 'esPage' },
+      r.div({ className: 'esPage' + compactClass },
         page_isChatChannel(store.pageRole) ? null : debiki2.reactelements.TopBar({}),
         debiki2.page.ScrollButtons(),
         r.div({ className: 'container' },
@@ -90,7 +103,7 @@ var Page = createComponent({
 });
 
 
-function renderTitleBodyComments() {
+export function renderTitleBodyComments() {
   var root = document.getElementById('dwPosts');
   if (!root)
     return;
@@ -109,7 +122,7 @@ function renderTitleBodyComments() {
 }
 
 
-function renderTitleBodyCommentsToString() {
+export function renderTitleBodyCommentsToString() {
   debiki2.avatar.resetAvatars();
 
   // Comment in the next line to skip React server side and debug in browser only.
@@ -131,6 +144,6 @@ function renderTitleBodyCommentsToString() {
 }
 
 //------------------------------------------------------------------------------
-
+   }
 //------------------------------------------------------------------------------
 // vim: fdm=marker et ts=2 sw=2 tw=0 list

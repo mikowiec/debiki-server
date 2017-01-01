@@ -19,6 +19,7 @@
 /// <reference path="../../typedefs/jquery/jquery.d.ts" />
 /// <reference path="../plain-old-javascript.d.ts" />
 /// <reference path="../model.ts" />
+/// <reference path="../rules.ts" />
 /// <reference path="../page-methods.ts" />
 
 //------------------------------------------------------------------------------
@@ -30,16 +31,33 @@ var $: any = d.i.$;  // type JQuery –> Typescript won't find parseHTML :- (
 
 
 export function activateAnyCustomForm() {
-   var $forms = $('.dw-p-bd form');
+   let $forms = $('.dw-p-bd form');
    $forms.on('submit', function (event) {
-      var $form = $(this);
-      var namesAndValues = $form.serializeArray();
-      // This messes with stuff rendered by React, but works fine nevertheless.
-      Server.submitCustomForm(namesAndValues, function() {
-         $form.replaceWith($.parseHTML('<p class="esFormThanks">Thank you.</p>'));
-      });
-      $form.find('button[type=submit]').text("Submitting ...").attr('disabled', 'disabled');
       event.preventDefault();
+      event.stopPropagation();
+      let $form = $(this);
+      let namesAndValues = $form.serializeArray();
+      let doWhat = _.find(namesAndValues, (nv: any) => nv.name === 'doWhat');
+      if (doWhat) {
+        if (doWhat.value === 'CreateTopic') {
+          Server.submitCustomFormAsNewTopic(namesAndValues);
+        }
+        else if (doWhat.value === 'SignUp') {
+          morebundle.loginIfNeeded(LoginReason.SignUp);
+        }
+        else {
+          die(`Unknown input name=doWhat value: '${doWhat.value}' [EdE8402F4]`);
+        }
+      }
+      else {
+        Server.submitCustomFormAsJsonReply(namesAndValues, function() {
+           // This messes with stuff rendered by React, but works fine nevertheless.
+           var thanks = $form.find('.FormThanks');
+           $form.replaceWith(
+               thanks.length ? thanks : $.parseHTML('<p class="esFormThanks">Thank you.</p>'));
+        });
+        $form.find('button[type=submit]').text("Submitting ...").attr('disabled', 'disabled');
+      }
    });
 }
 

@@ -31,6 +31,10 @@ trait AllSettings {
 
   def userMustBeAuthenticated: Boolean
   def userMustBeApproved: Boolean
+  // def approveInvitesHow: HowApproveInvites.BeforeTheyAreSent/AfterSignup/AlwaysAllow
+  def inviteOnly: Boolean
+  def allowSignup: Boolean
+  def allowLocalSignup: Boolean
   def allowGuestLogin: Boolean
   def numFirstPostsToReview: Int
   def numFirstPostsToApprove: Int
@@ -53,11 +57,24 @@ trait AllSettings {
   def showComplicatedStuff: Boolean
   def htmlTagCssClasses: String
 
+  def numFlagsToHidePost: Int
+  def cooldownMinutesAfterFlaggedHidden: Int
+
+  def numFlagsToBlockNewUser: Int
+  def numFlaggersToBlockNewUser: Int
+  def notifyModsIfUserBlocked: Boolean
+
+  def regularMemberFlagWeight: Float
+  def coreMemberFlagWeight: Float
+
   def toJson = Settings2.settingsToJson(toEditedSettings)
 
   def toEditedSettings = EditedSettings(
     userMustBeAuthenticated = Some(self.userMustBeAuthenticated),
     userMustBeApproved = Some(self.userMustBeApproved),
+    inviteOnly = Some(self.inviteOnly),
+    allowSignup = Some(self.allowSignup),
+    allowLocalSignup = Some(self.allowLocalSignup),
     allowGuestLogin = Some(self.allowGuestLogin),
     numFirstPostsToReview = Some(self.numFirstPostsToReview),
     numFirstPostsToApprove = Some(self.numFirstPostsToApprove),
@@ -78,7 +95,14 @@ trait AllSettings {
     contentLicense = Some(self.contentLicense),
     googleUniversalAnalyticsTrackingId = Some(self.googleUniversalAnalyticsTrackingId),
     showComplicatedStuff = Some(self.showComplicatedStuff),
-    htmlTagCssClasses = Some(self.htmlTagCssClasses))
+    htmlTagCssClasses = Some(self.htmlTagCssClasses),
+    numFlagsToHidePost = Some(self.numFlagsToHidePost),
+    cooldownMinutesAfterFlaggedHidden = Some(self.cooldownMinutesAfterFlaggedHidden),
+    numFlagsToBlockNewUser = Some(self.numFlagsToBlockNewUser),
+    numFlaggersToBlockNewUser = Some(self.numFlaggersToBlockNewUser),
+    notifyModsIfUserBlocked = Some(self.notifyModsIfUserBlocked),
+    regularMemberFlagWeight = Some(self.regularMemberFlagWeight),
+    coreMemberFlagWeight = Some(self.coreMemberFlagWeight))
 }
 
 
@@ -93,6 +117,9 @@ object AllSettings {
   val Default = new AllSettings {
     val userMustBeAuthenticated = false
     val userMustBeApproved = false
+    val inviteOnly = false
+    val allowSignup = true
+    val allowLocalSignup = true
     val allowGuestLogin = false
     val numFirstPostsToReview = 1
     val numFirstPostsToApprove = 0
@@ -118,6 +145,13 @@ object AllSettings {
     val googleUniversalAnalyticsTrackingId = ""
     val showComplicatedStuff = false
     val htmlTagCssClasses = ""
+    def numFlagsToHidePost = 3
+    def cooldownMinutesAfterFlaggedHidden = 10
+    def numFlagsToBlockNewUser = 3
+    def numFlaggersToBlockNewUser = 3
+    def notifyModsIfUserBlocked = true
+    def regularMemberFlagWeight = 1.5f
+    def coreMemberFlagWeight = 2.0f
   }
 }
 
@@ -138,6 +172,9 @@ case class EffectiveSettings(
 
   def userMustBeAuthenticated: Boolean = firstInChain(_.userMustBeAuthenticated) getOrElse default.userMustBeAuthenticated
   def userMustBeApproved: Boolean = firstInChain(_.userMustBeApproved) getOrElse default.userMustBeApproved
+  def inviteOnly: Boolean = firstInChain(_.inviteOnly) getOrElse default.inviteOnly
+  def allowSignup: Boolean = firstInChain(_.allowSignup) getOrElse default.allowSignup
+  def allowLocalSignup: Boolean = firstInChain(_.allowLocalSignup) getOrElse default.allowLocalSignup
   def allowGuestLogin: Boolean = firstInChain(_.allowGuestLogin) getOrElse default.allowGuestLogin
   def numFirstPostsToReview: Int = firstInChain(_.numFirstPostsToReview) getOrElse default.numFirstPostsToReview
   def numFirstPostsToApprove: Int = firstInChain(_.numFirstPostsToApprove) getOrElse default.numFirstPostsToApprove
@@ -160,8 +197,20 @@ case class EffectiveSettings(
   def showComplicatedStuff: Boolean = firstInChain(_.showComplicatedStuff) getOrElse default.showComplicatedStuff
   def htmlTagCssClasses: String = firstInChain(_.htmlTagCssClasses) getOrElse default.htmlTagCssClasses
 
+  def numFlagsToHidePost: Int = firstInChain(_.numFlagsToHidePost) getOrElse default.numFlagsToHidePost
+  def cooldownMinutesAfterFlaggedHidden: Int = firstInChain(_.cooldownMinutesAfterFlaggedHidden) getOrElse default.cooldownMinutesAfterFlaggedHidden
+
+  def numFlagsToBlockNewUser: Int = firstInChain(_.numFlagsToBlockNewUser) getOrElse default.numFlagsToBlockNewUser
+  def numFlaggersToBlockNewUser: Int = firstInChain(_.numFlaggersToBlockNewUser) getOrElse default.numFlaggersToBlockNewUser
+  def notifyModsIfUserBlocked: Boolean = firstInChain(_.notifyModsIfUserBlocked) getOrElse default.notifyModsIfUserBlocked
+
+  def regularMemberFlagWeight: Float = firstInChain(_.regularMemberFlagWeight) getOrElse default.regularMemberFlagWeight
+  def coreMemberFlagWeight: Float = firstInChain(_.coreMemberFlagWeight) getOrElse default.coreMemberFlagWeight
+
+
   def isGuestLoginAllowed =
-    allowGuestLogin && !userMustBeAuthenticated && !userMustBeApproved
+    allowGuestLogin && !userMustBeAuthenticated && !userMustBeApproved &&
+      !inviteOnly && allowSignup
 
   /** Finds any invalid setting value, or invalid settings configurations. */
   def findAnyError: Option[String] = {
@@ -179,6 +228,9 @@ object Settings2 {
     Json.obj(
       "userMustBeAuthenticated" -> JsBooleanOrNull(s.userMustBeAuthenticated),
       "userMustBeApproved" -> JsBooleanOrNull(s.userMustBeApproved),
+      "inviteOnly" -> JsBooleanOrNull(s.inviteOnly),
+      "allowSignup" -> JsBooleanOrNull(s.allowSignup),
+      "allowLocalSignup" -> JsBooleanOrNull(s.allowLocalSignup),
       "allowGuestLogin" -> JsBooleanOrNull(s.allowGuestLogin),
       "numFirstPostsToReview" -> JsNumberOrNull(s.numFirstPostsToReview),
       "numFirstPostsToApprove" -> JsNumberOrNull(s.numFirstPostsToApprove),
@@ -199,15 +251,25 @@ object Settings2 {
       "contentLicense" -> JsNumberOrNull(s.contentLicense.map(_.toInt)),
       "googleUniversalAnalyticsTrackingId" -> JsStringOrNull(s.googleUniversalAnalyticsTrackingId),
       "showComplicatedStuff" -> JsBooleanOrNull(s.showComplicatedStuff),
-      "htmlTagCssClasses" -> JsStringOrNull(s.htmlTagCssClasses))
+      "htmlTagCssClasses" -> JsStringOrNull(s.htmlTagCssClasses),
+      "numFlagsToHidePost" -> JsNumberOrNull(s.numFlagsToHidePost),
+      "cooldownMinutesAfterFlaggedHidden" -> JsNumberOrNull(s.cooldownMinutesAfterFlaggedHidden),
+      "numFlagsToBlockNewUser" -> JsNumberOrNull(s.numFlagsToBlockNewUser),
+      "numFlaggersToBlockNewUser" -> JsNumberOrNull(s.numFlaggersToBlockNewUser),
+      "notifyModsIfUserBlocked" -> JsBooleanOrNull(s.notifyModsIfUserBlocked),
+      "regularMemberFlagWeight" -> JsFloatOrNull(s.regularMemberFlagWeight),
+      "coreMemberFlagWeight" -> JsFloatOrNull(s.coreMemberFlagWeight))
   }
 
 
   def d = AllSettings.Default
 
-  def settingsToSaveFromJson(json: JsValue) = new SettingsToSave(
+  def settingsToSaveFromJson(json: JsValue) = SettingsToSave(
     userMustBeAuthenticated = anyBool(json, "userMustBeAuthenticated", d.userMustBeAuthenticated),
     userMustBeApproved = anyBool(json, "userMustBeApproved", d.userMustBeApproved),
+    inviteOnly = anyBool(json, "inviteOnly", d.inviteOnly),
+    allowSignup = anyBool(json, "allowSignup", d.allowSignup),
+    allowLocalSignup = anyBool(json, "allowLocalSignup", d.allowLocalSignup),
     allowGuestLogin = anyBool(json, "allowGuestLogin", d.allowGuestLogin),
     numFirstPostsToReview = anyInt(json, "numFirstPostsToReview", d.numFirstPostsToReview),
     numFirstPostsToApprove = anyInt(json, "numFirstPostsToApprove", d.numFirstPostsToApprove),
@@ -232,31 +294,38 @@ object Settings2 {
     googleUniversalAnalyticsTrackingId =
       anyString(json, "googleUniversalAnalyticsTrackingId", d.googleUniversalAnalyticsTrackingId),
     showComplicatedStuff = anyBool(json, "showComplicatedStuff", d.showComplicatedStuff),
-    htmlTagCssClasses = anyString(json, "htmlTagCssClasses", d.htmlTagCssClasses))
+    htmlTagCssClasses = anyString(json, "htmlTagCssClasses", d.htmlTagCssClasses),
+    numFlagsToHidePost = anyInt(json, "numFlagsToHidePost", d.numFlagsToHidePost),
+    cooldownMinutesAfterFlaggedHidden = anyInt(json, "cooldownMinutesAfterFlaggedHidden", d.cooldownMinutesAfterFlaggedHidden  ),
+    numFlagsToBlockNewUser = anyInt(json, "numFlagsToBlockNewUser", d.numFlagsToBlockNewUser  ),
+    numFlaggersToBlockNewUser = anyInt(json, "numFlaggersToBlockNewUser", d.numFlaggersToBlockNewUser  ),
+    notifyModsIfUserBlocked = anyBool(json, "notifyModsIfUserBlocked", d.notifyModsIfUserBlocked  ),
+    regularMemberFlagWeight = anyFloat(json, "regularMemberFlagWeight", d.regularMemberFlagWeight  ),
+    coreMemberFlagWeight = anyFloat(json, "coreMemberFlagWeight", d.coreMemberFlagWeight))
 
 
   private def anyString(json: JsValue, field: String, default: String): Option[Option[String]] =
-    (json \ field).toOption.map(_ match {
+    (json \ field).toOption.map {
       case s: JsString =>
         if (s.value == default) None else Some(s.value)
       case JsNull =>
         None
       case bad =>
         throwBadRequest("EsE5J4K02", s"'$field' is not a JsString, but a ${classNameOf(bad)}")
-    })
+    }
 
   private def anyBool(json: JsValue, field: String, default: Boolean): Option[Option[Boolean]] =
-    (json \ field).toOption.map(_ match {
+    (json \ field).toOption.map {
       case b: JsBoolean =>
         if (b.value == default) None else Some(b.value)
       case JsNull =>
         None
       case bad =>
         throwBadRequest("EsE5J4K02", s"'$field' is not a JsBoolean, but a ${classNameOf(bad)}")
-    })
+    }
 
   private def anyInt(json: JsValue, field: String, default: Int): Option[Option[Int]] =
-    (json \ field).toOption.map(_ match {
+    (json \ field).toOption.map {
       case n: JsNumber =>
         val value = n.value.toInt
         if (value == default) None else Some(value)
@@ -264,5 +333,16 @@ object Settings2 {
         None
       case bad =>
         throwBadRequest("EsE5J4K02", s"'$field' is not a JsNumber, but a ${classNameOf(bad)}")
-    })
+    }
+
+  private def anyFloat(json: JsValue, field: String, default: Float): Option[Option[Float]] =
+    (json \ field).toOption.map {
+      case n: JsNumber =>
+        val value = n.value.toFloat
+        if (value == default) None else Some(value)
+      case JsNull =>
+        None
+      case bad =>
+        throwBadRequest("EdE7GK2Z8", s"'$field' is not a JsNumber, but a ${classNameOf(bad)}")
+    }
 }

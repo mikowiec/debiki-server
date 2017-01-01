@@ -28,7 +28,7 @@ import java.{util => ju}
 import play.{api => p}
 import play.api.Play.current
 import scala.collection.mutable
-import scala.concurrent.{Promise, Future}
+import scala.concurrent.{Future, Promise}
 
 
 object Mailer {
@@ -45,20 +45,20 @@ object Mailer {
     */
   def startNewActor(actorSystem: ActorSystem, daoFactory: SiteDaoFactory): ActorRef = {
     val config = p.Play.configuration
-    val anySmtpServerName = config.getString("debiki.smtp.host").orElse(
-      config.getString("debiki.smtp.server")).noneIfBlank // old deprecated name
-    val anySmtpPort = config.getInt("debiki.smtp.port")
-    val anySmtpSslPort = config.getInt("debiki.smtp.sslPort")
-    val anySmtpUserName = config.getString("debiki.smtp.user").noneIfBlank
-    val anySmtpPassword = config.getString("debiki.smtp.password").noneIfBlank
-    val anyUseSslOrTls = config.getBoolean("debiki.smtp.useSslOrTls")
-    val anyFromAddress = config.getString("debiki.smtp.fromAddress").noneIfBlank
+    val anySmtpServerName = config.getString("ed.smtp.host").orElse(
+      config.getString("ed.smtp.server")).noneIfBlank // old deprecated name
+    val anySmtpPort = config.getInt("ed.smtp.port")
+    val anySmtpSslPort = config.getInt("ed.smtp.sslPort")
+    val anySmtpUserName = config.getString("ed.smtp.user").noneIfBlank
+    val anySmtpPassword = config.getString("ed.smtp.password").noneIfBlank
+    val anyUseSslOrTls = config.getBoolean("ed.smtp.useSslOrTls")
+    val anyFromAddress = config.getString("ed.smtp.fromAddress").noneIfBlank
 
     val actorRef =
         (anySmtpServerName, anySmtpPort, anySmtpSslPort, anySmtpUserName, anySmtpPassword, anyFromAddress) match {
       case (Some(serverName), Some(port), Some(sslPort), Some(userName), Some(password), Some(fromAddress)) =>
         val useSslOrTls = anyUseSslOrTls getOrElse {
-          p.Logger.info(o"""Email config value debiki.smtp.useSslOrTls not configured,
+          p.Logger.info(o"""Email config value ed.smtp.useSslOrTls not configured,
             defaulting to true.""")
           true
         }
@@ -76,12 +76,12 @@ object Mailer {
           name = s"MailerActor-$testInstanceCounter")
       case _ =>
         var message = "I won't send emails, because:"
-        if (anySmtpServerName.isEmpty) message += " No debiki.smtp.host configured."
-        if (anySmtpPort.isEmpty) message += " No debiki.smtp.port configured."
-        if (anySmtpSslPort.isEmpty) message += " No debiki.smtp.sslPort configured."
-        if (anySmtpUserName.isEmpty) message += " No debiki.smtp.user configured."
-        if (anySmtpPassword.isEmpty) message += " No debiki.smtp.password configured."
-        if (anyFromAddress.isEmpty) message += " No debiki.smtp.fromAddress configured."
+        if (anySmtpServerName.isEmpty) message += " No ed.smtp.host configured."
+        if (anySmtpPort.isEmpty) message += " No ed.smtp.port configured."
+        if (anySmtpSslPort.isEmpty) message += " No ed.smtp.sslPort configured."
+        if (anySmtpUserName.isEmpty) message += " No ed.smtp.user configured."
+        if (anySmtpPassword.isEmpty) message += " No ed.smtp.password configured."
+        if (anyFromAddress.isEmpty) message += " No ed.smtp.fromAddress configured."
         p.Logger.info(message)
         actorSystem.actorOf(
           Props(new Mailer(
@@ -134,14 +134,14 @@ class Mailer(
   def receive = {
     case (email: Email, tenantId: String) =>
       sendEmail(email, tenantId)
-    case ("GetEndToEndTestEmail", address: String) =>
-      e2eTestEmails.get(address) match {
+    case ("GetEndToEndTestEmail", siteIdColonEmailAddress: String) =>
+      e2eTestEmails.get(siteIdColonEmailAddress) match {
         case Some(promise) =>
           sender() ! promise.future
         case None =>
           SECURITY // DoS attack: don't add infinitely many promises in prod mode
           val newPromise = Promise[Email]()
-          e2eTestEmails.put(address, newPromise)
+          e2eTestEmails.put(siteIdColonEmailAddress, newPromise)
           sender() ! newPromise.future
       }
     /*
@@ -167,7 +167,7 @@ class Mailer(
     logger.debug(s"Sending email: $emailToSend")
 
     // Reload the user and his/her email address in case it's been changed recently.
-    val address = emailToSend.toUserId.flatMap(tenantDao.loadUser).map(_.email) getOrElse
+    val address = emailToSend.toUserId.flatMap(tenantDao.getUser).map(_.email) getOrElse
       emailToSend.sentTo
 
     val email = emailToSend.copy(sentTo = address, sentOn = now, providerEmailId = None)
@@ -217,11 +217,21 @@ class Mailer(
   def fakeSendAndRememberForE2eTests(email: Email, siteDao: SiteDao) {
     play.api.Logger.debug(i"""
       |Fake-sending email (only logging it to the console): [EsM6LK4J2]
-      |  $email
+      |————————————————————————————————————————————————————————————
+      |$email
+      |————————————————————————————————————————————————————————————
       |""")
     val emailSent = email.copy(sentOn = Some(new ju.Date))
     siteDao.updateSentEmail(emailSent)
-    e2eTestEmails.get(email.sentTo) match {
+    if (Email.isE2eTestEmailAddress(email.sentTo)) {
+      rememberE2eTestEmail(email, siteDao)
+    }
+  }
+
+
+  def rememberE2eTestEmail(email: Email, siteDao: SiteDao) {
+    val siteIdColonEmailAddress = s"${siteDao.siteId}:${email.sentTo}"
+    e2eTestEmails.get(siteIdColonEmailAddress) match {
       case Some(promise: Promise[Email]) =>
         if (promise.isCompleted) {
           p.Logger.debug("Promise already completed, why? [DwM2PK3] Any email: " +
@@ -232,7 +242,7 @@ class Mailer(
         }
       case None =>
         SECURITY // DoS attack: don't remember infinitely many addresses in prod mode
-        e2eTestEmails.put(email.sentTo, Promise.successful(email))
+        e2eTestEmails.put(siteIdColonEmailAddress, Promise.successful(email))
     }
   }
 

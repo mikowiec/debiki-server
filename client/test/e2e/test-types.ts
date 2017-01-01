@@ -7,13 +7,17 @@ interface TestSettings {
   secure: boolean;
   host: string;
   scheme: string;
+  deleteOldSite: boolean;
+  localHostname?: string; // must start with 'e2e-test-' (see settings.ts)
   testLocalHostnamePrefix: string;
   testEmailAddressPrefix: string;
   e2eTestPassword: string;
   forbiddenPassword: string;
   mainSiteOrigin: string;
   newSiteDomain: string;
-  waitforTimeout: string;
+  bail?: number;
+  waitforTimeout: number;
+  debugBefore: boolean;
   debugAfterwards: boolean;
   include3rdPartyDependentTests?: boolean;
   grep: string;
@@ -30,7 +34,19 @@ interface TestSettings {
 
 interface SiteData {
   meta: SiteMeta;
-  settings: any;
+  settings: {
+    companyFullName: string,
+    // inviteOnly?: boolean;
+    allowSignup?: boolean;
+    // allowLocalSignup?: boolean;
+    allowGuestLogin?: boolean,
+    numFirstPostsToReview?: number,
+    numFirstPostsToApprove?: number,
+    numFirstPostsToAllow?: number,
+    numFlagsToHidePost?: number,
+    numFlagsToBlockNewUser?: number,
+    numFlaggersToBlockNewUser?: number,
+  };
   groups: any;
   members: Member[];
   identities: any;
@@ -51,6 +67,7 @@ interface SiteData {
 
 interface SiteMeta {
   id?: string;
+  name: string;
   localHostname: string;
   creatorEmailAddress: string;
   status: SiteStatus,
@@ -66,9 +83,12 @@ interface Member {
   emailAddress: string;
   emailVerifiedAtMs?: number;
   passwordHash: string;
+  password: string;
   isOwner?: boolean;
   isAdmin?: boolean;
   isModerator?: boolean;
+  trustLevel?: TrustLevel;
+  threatLevel?: ThreatLevel;
 }
 
 
@@ -180,6 +200,7 @@ interface PagePathWithId {
 
 interface NewTestPost {
   id?: number;
+  // Not just page id, because needs author, creation date, etc.
   page: Page;
   nr: number;
   parentNr?: number;
@@ -253,7 +274,8 @@ interface NewCategoryStuff {
 
 interface IdAddress {
   id: string;
-  siteIdOrigin: string;
+  origin: string, // e.g. kittens-forum.example.com
+  siteIdOrigin: string; // e.g. site-123.example.com
 }
 
 

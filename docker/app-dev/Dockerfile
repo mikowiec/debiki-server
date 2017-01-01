@@ -7,7 +7,7 @@ RUN apk add --no-cache \
   # Nice to have: (why telnet not found?)
   tree less wget net-tools bash
 
-ENV ACVERSION 1.3.10
+ENV ACVERSION 1.3.12
 ENV ACTIVATOR activator-$ACVERSION
 
 RUN \
@@ -49,15 +49,15 @@ ENTRYPOINT ["/docker-entrypoint.sh"]
 # Overriden in docker-compose.yml
 ENV PLAY_HEAP_MEMORY_MB 1048
 
-CMD ["/opt/typesafe-activator/bin/activator", \
-  "-mem $PLAY_HEAP_MEMORY_MB", \
-  "-jvm-debug 9999", \
-  # see [30PUK42] in app-prod/Dockerfile
-  "-Djava.security.egd=file:/dev/./urandom", \
-  "-Dcom.sun.management.jmxremote.port=3333", \
-  "-Dcom.sun.management.jmxremote.ssl=false", \
-  "-Dcom.sun.management.jmxremote.authenticate=false", \
-  "-Dhttp.port=9000", \
-  "-Dhttps.port=9443", \
-  "run"]
+CMD cd /opt/ed/app/ && exec /opt/typesafe-activator/bin/activator \
+  -mem $PLAY_HEAP_MEMORY_MB \
+  -jvm-debug 9999 \
+   # see [30PUK42] in app-prod/Dockerfile
+  -Djava.security.egd=file:/dev/./urandom \
+  -Dcom.sun.management.jmxremote.port=3333 \
+  -Dcom.sun.management.jmxremote.ssl=false \
+  -Dcom.sun.management.jmxremote.authenticate=false \
+  -Dhttp.port=9000 \
+  -Dhttps.port=9443 \
+  run
 

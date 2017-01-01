@@ -74,6 +74,7 @@ class SiteDao(
   with AssetBundleDao
   with SettingsDao
   with SpecialContentDao
+  with ed.server.auth.AuthzSiteDaoMixin
   with ForumDao
   with CategoriesDao
   with PagesDao
@@ -83,6 +84,7 @@ class SiteDao(
   with PostsDao
   with TagsDao
   with SearchDao
+  with ed.server.spam.QuickSpamCheckDao
   with UploadsDao
   with UserDao
   with MessagesDao
@@ -124,6 +126,7 @@ class SiteDao(
   private def thisSiteCacheKey = siteCacheKey(this.siteId)
 
 
+  // Rename to ...NoRetry, add readWriteTransactionWithRetry
   def readWriteTransaction[R](fn: SiteTransaction => R, allowOverQuota: Boolean = false): R = {
     // Serialize writes per site. This avoids all? transaction rollbacks because of
     // serialization errors in Postgres (e.g. if 2 people post 2 comments at the same time).
@@ -137,6 +140,7 @@ class SiteDao(
       dbDao2.readWriteSiteTransaction(siteId, allowOverQuota) {
         fn(_)
       }
+      // If serialization error, try once? twice? again?
     }
   }
 
@@ -151,7 +155,7 @@ class SiteDao(
     memCache.firePageSaved(SitePageId(siteId = siteId, pageId = pageId))
   }
 
-  def refreshPagesInAnyCache(pageIds: Set[PageId]) {
+  def refreshPagesInAnyCache(pageIds: collection.Set[PageId]) {
     pageIds.foreach(refreshPageInMemCache)
   }
 
@@ -197,7 +201,7 @@ class SiteDao(
     Some(site)
   }
 
-  def ensureSiteActiveOrThrow(newMember: CompleteUser, transaction: SiteTransaction) {
+  def ensureSiteActiveOrThrow(newMember: MemberInclDetails, transaction: SiteTransaction) {
     // The throwForbidden exceptions can be triggered for example if someone starts signing up,
     // then the site gets deleted, and then the person clicks the submit button in
     // the signup form. (I.e. a race condition, and that's fine.)
@@ -246,7 +250,11 @@ class SiteDao(
         throwForbidden2("EsE3KYP2", "You've changed hostname too many times")
       }
       transaction.changeCanonicalHostRoleToExtra()
-      transaction.insertSiteHost(SiteHost(newHostname, SiteHost.RoleCanonical))
+      try transaction.insertSiteHost(SiteHost(newHostname, SiteHost.RoleCanonical))
+      catch {
+        case _: DuplicateHostnameException =>
+          throwForbidden2("EdE7FKW20", s"There's already a site with hostname '$newHostname'")
+      }
       uncacheSite()
     }
   }
@@ -307,83 +315,6 @@ class SiteDao(
 
   def loadEmailById(emailId: String): Option[Email] =
     readOnlyTransaction(_.loadEmailById(emailId))
-
-
-  // ----- Authorization
-  // (move to separate mixin, later?)
-
-  def throwIfMayNotSeePost(post: Post, author: Option[User])(transaction: SiteTransaction) {
-    val pageMeta = transaction.loadPageMeta(post.pageId) getOrElse
-      throwIndistinguishableNotFound("EsE8YJK40")
-    throwIfMayNotSeePage(pageMeta, author)(transaction)
-    def isStaffOrAuthor = author.exists(_.isStaff) || author.exists(_.id == post.createdById)
-    if (post.isDeleted && !isStaffOrAuthor)
-      throwIndistinguishableNotFound("EsE8YK04W")
-  }
-
-
-  def throwIfMayNotSeePage(page: Page, user: Option[User])(transaction: SiteTransaction) {
-    throwIfMayNotSeePage(page.meta, user)(transaction)
-  }
-
-
-  def throwIfMayNotSeePage(pageMeta: PageMeta, user: Option[User])(transaction: SiteTransaction) {
-    if (!user.exists(_.isStaff)) {
-      val ancestors = pageMeta.categoryId match {
-        case Some(id) =>
-          throwIfMayNotSeeCategory(id, user)(transaction)
-        case None =>
-          // Deny access unless this is a private messages page.
-          if (pageMeta.pageRole != PageRole.FormalMessage)
-            throwIndistinguishableNotFound("EsE0YK25-No-Category")
-
-          if (user.isEmpty)
-            throwIndistinguishableNotFound("EsE5PK4Z-No-User")
-
-          val pageMembers = transaction.loadMessageMembers(pageMeta.pageId)
-          if (!pageMembers.contains(user.getOrDie("EsE2WY50F3").id))
-            throwIndistinguishableNotFound("EsE5GYK0V-Not-Message-Member")
-      }
-    }
-  }
-
-
-  def throwIfMayNotSeeCategory(categoryId: CategoryId, user: Option[User])(
-        transaction: SiteTransaction) {
-    if (user.exists(_.isStaff))
-      return
-
-    val categories = transaction.loadCategoryPathRootLast(categoryId)
-    if (categories.exists(_.staffOnly))
-      throwIndistinguishableNotFound("EsE7YKG25")
-  }
-
-
-  def throwIfMayNotCreatePageIn(categoryId: CategoryId, user: Option[User])(
-        transaction: SiteTransaction) {
-    if (user.exists(_.isStaff))
-      return
-
-    val categories = transaction.loadCategoryPathRootLast(categoryId)
-    if (categories.exists(_.staffOnly))
-      throwIndistinguishableNotFound("EsE5PWX29")
-    if (categories.exists(_.onlyStaffMayCreateTopics))
-      throwForbidden2("EsE8YK3W2", "You may not start new topics in this category")
-  }
-
-  def throwIfMayNotPostTo(page: Page, postAuthor: User)(transaction: SiteTransaction) {
-    throwIfMayNotSeePage(page, Some(postAuthor))(transaction)
-    if (!page.role.canHaveReplies)
-      throwForbidden2("EsE8YGK42", s"Cannot post to page type ${page.role}")
-
-    // Mind maps can easily get messed up by people posting comments. So, for now, only
-    // allow the page author + staff to add stuff to a mind map. [7KUE20]
-    if (page.role == PageRole.MindMap) {
-      if (postAuthor.id != page.meta.authorId && !postAuthor.isStaff)
-        throwForbidden("EsE6JK4I0", s"Only the page author and staff may edit this mind map")
-    }
-
-  }
 
 }
 

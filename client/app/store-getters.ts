@@ -33,15 +33,34 @@
 
 
 export function store_thisIsMyPage(store: Store): boolean {
-  var pageBody = store.allPosts[BodyId];
-  dieIf(!pageBody, 'EsE5YKF2');
-  return store.me.userId === pageBody.authorIdInt;
+  if (!store.allPosts) return false;
+  var bodyOrTitle = store.allPosts[BodyId] || store.allPosts[TitleId];
+  dieIf(!bodyOrTitle, 'EsE5YKF2');
+  return store.me.userId === bodyOrTitle.authorIdInt;
 }
 
 
-export function store_authorOf(store: Store, post: Post): BriefUser {
-  var user = store.usersByIdBrief[post.authorIdInt];
-  dieIf(!user, "Author " + post.authorIdInt + " missing on page " + store.pageId + " [EsE5GK92]");
+export function store_getAuthorOrMissing(store: Store, post: Post): BriefUser {
+  var user = store_getUserOrMissing(store, post.authorIdInt, false);
+  if (user.isMissing) logError("Author " + post.authorIdInt + " missing, page: " +
+      debiki.pageId + ", post: " + post.postId + " [EsE6TK2R0]");
+  return user;
+}
+
+
+export function store_getUserOrMissing(store: Store, userId: UserId, errorCode2): BriefUser {
+  var user = store.usersByIdBrief[userId];
+  if (!user) {
+    if (errorCode2) logError("User " + userId + " missing, page: " + debiki.pageId +
+        ' [EsE38GT2R-' + errorCode2 + ']');
+    return {
+      id: userId,
+      // The first char is shown in the avatar image. Use a square, not a character, so
+      // it'll be easier to debug-find-out that something is amiss.
+      fullName: "□ missing, id: " + userId + " [EsE4FK07_]",
+      isMissing: true,
+    };
+  }
   return user;
 }
 
@@ -52,11 +71,7 @@ export function store_isUserOnline(store: Store, userId: UserId): boolean {
 
 
 export function store_getPageMembersList(store: Store): BriefUser[] {
-  return store.pageMemberIds.map(id => {
-    var user = store.usersByIdBrief[id];
-    dieIf(!user, "Member " + id + " missing on page " + store.pageId + " [EsE5KW2]");
-    return user;
-  });
+  return store.pageMemberIds.map(id => store_getUserOrMissing(store, id, 'EsE4UY2S'));
 }
 
 
@@ -64,8 +79,7 @@ export function store_getUsersOnThisPage(store: Store): BriefUser[] {
   var users: BriefUser[] = [];
   _.each(store.allPosts, (post: Post) => {
     if (_.every(users, u => u.id !== post.authorIdInt)) {
-      var user = store.usersByIdBrief[post.authorIdInt];
-      dieIf(!user, "Author missing, post id " + post.uniqueId + " [EsE4UGY2]");
+      var user = store_getAuthorOrMissing(store, post);
       users.push(user);
     }
   });
@@ -75,10 +89,10 @@ export function store_getUsersOnThisPage(store: Store): BriefUser[] {
 
 export function store_getUsersOnline(store: Store): BriefUser[] {
   var users = [];
-  _.forOwn(store.userIdsOnline, (alwaysTrue, userId) => {
+  // (Using userId:any, otherwise Typescript thinks it's a string)
+  _.forOwn(store.userIdsOnline, (alwaysTrue, userId: any) => {
     dieIf(!alwaysTrue, 'EsE7YKW2');
-    var user = store.usersByIdBrief[userId];
-    logErrorIf(!user, 'EsE5JYK02');
+    var user = store_getUserOrMissing(store, userId, 'EsE5GK0Y');
     if (user) users.push(user);
   });
   return users;
@@ -118,7 +132,8 @@ export function store_getUsersHere(store: Store): UsersHere {
 
 export function store_canDeletePage(store: Store): boolean {
   // For now, don't let people delete sections = their forum — that just makes them confused.
-  return !store.pageDeletedAtMs && isStaff(store.me) && !isSection(store.pageRole);
+  return !store.pageDeletedAtMs && isStaff(store.me) &&
+      store.pageRole && !isSection(store.pageRole);
 }
 
 
@@ -155,6 +170,49 @@ export function store_thereAreFormReplies(store: Store): boolean {
   });
 }
 
+
+export function store_shallShowPageToolsButton(store: Store) {
+  return store_canPinPage(store) || store_canDeletePage(store) || store_canUndeletePage(store);
+}
+
+
+export function store_canPinPage(store: Store) {
+  return store.categoryId && store.pageRole !== PageRole.Forum;
+}
+
+
+// Use for responsive layout, when you need the page width (excluding watchbar and contextbar).
+// Avoid $().width() or elem.getBoundingClientRect() because they force a layout reflow,
+// which makes the initial rendering of the page take longer (about 30ms longer = 8% longer,
+// as of September 2016, core i7 laptop).
+//
+// Could use https://github.com/marcj/css-element-queries/, but store_getApproxPageWidth() is
+// probably faster (since doesn't need to ask the browser about anything, no layout
+// reflows needed), and simpler too (a lot less code, in total).
+//
+export function store_getApproxPageWidth(store: Store) {   // [6KP024]
+  if (isServerSide())
+    return ServerSideWindowWidth;
+
+  // outerWidth supposedly doesn't force a reflow (and I've verified in Chrome Dev Tools Timeline
+  // that it doesn't). So use it instead of innerWidth — they might differ perhaps 10 pixels
+  // because of browser window borders (or what else? There are no window scrollbars [6GKF0WZ]).
+  var browserWidth = window.outerWidth;
+  var width = browserWidth;
+  if (store.isWatchbarOpen) {
+    width -= WatchbarWidth;
+  }
+  if (store.isContextbarOpen) {
+    var contextbarWidth = browserWidth * 0.25;  // 0.25 is dupl in css [5RK9W2]
+    if (contextbarWidth < ContextbarMinWidth) {
+      contextbarWidth = ContextbarMinWidth;
+    }
+    width -= contextbarWidth;
+  }
+  // This is not the exact width in pixels, unless the browser window is in full screen so that
+  // there are no browser window borders.
+  return width;
+}
 
 //------------------------------------------------------------------------------
    }

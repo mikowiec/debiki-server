@@ -31,7 +31,10 @@ object Debiki {
   def createPostgresHikariDataSource(readOnly: Boolean): HikariDataSource = {
 
     def configStr(path: String) =
-      Play.configuration.getString(path) getOrElse
+      Play.configuration.getString(path).orElse({
+        val oldPath = path.replaceFirst("ed\\.", "debiki.")
+        Play.configuration.getString(oldPath)
+      }) getOrElse
         runErr("DwE93KI2", "Config value missing: "+ path)
 
     // I've hardcoded credentials to the test database here, so that it
@@ -40,22 +43,23 @@ object Debiki {
     // with "auto-deleted" as password?)
     def user =
       if (Play.isTest) "ed_test"
-      else configStr("debiki.postgresql.user")
+      else configStr("ed.postgresql.user")
 
     def password =
       if (Play.isTest) "public"
-      else sys.env.get("DEBIKI_POSTGRESQL_PASSWORD") getOrElse
-        configStr("debiki.postgresql.password")
+      else sys.env.get("ED_POSTGRESQL_PASSWORD").orElse(sys.env.get("DEBIKI_POSTGRESQL_PASSWORD"))
+          .getOrElse(configStr("ed.postgresql.password"))
 
     def database =
       if (Play.isTest) "ed_test"
-      else configStr("debiki.postgresql.database")
+      else configStr("ed.postgresql.database")
 
-    val server = Play.configuration.getString("debiki.postgresql.host").getOrElse(
-      configStr("debiki.postgresql.server"))  // deprecated name
-    val port = configStr("debiki.postgresql.port").toInt
+    val server = Play.configuration.getString("ed.postgresql.host").getOrElse(
+      configStr("ed.postgresql.server"))  // deprecated name
+    val port = configStr("ed.postgresql.port").toInt
 
-    play.Logger.info(s"Connecting to database: $server:$port/$database as user $user")
+    val readOrWrite = readOnly ? "read only" | "read-write"
+    play.Logger.info(s"Connecting to database: $server:$port/$database as user $user, $readOrWrite")
 
     // Weird now with Hikari I can no longer call setReadOnly or setTransactionIsolation. [5JKF2]
     val config = new HikariConfig()
@@ -67,7 +71,6 @@ object Debiki {
     config.addDataSourceProperty("databaseName", database)
 
     val WaitForConnectionMillis = 3000
-    val TooSlowQuerySeconds = 5 // very long in the context of a web app
 
     // Using too-many-connections temp hack  [7YKG25P]
     if (readOnly) {
@@ -83,7 +86,8 @@ object Debiki {
     // Set these to a little bit more than Hikari's connection timeout, so by default
     // Hikari will complain rather than the driver (Hikari works better I guess).
     // "How long to wait for establishment of a database connection", in seconds.
-    config.addDataSourceProperty("loginTimeout", TooSlowQuerySeconds)
+    config.addDataSourceProperty("loginTimeout", WaitForConnectionMillis / 1000 + 2) // seconds
+
     // "The timeout value used for socket connect operations"
     // "If connecting ... takes longer than this value, the connection is broken." Seconds.
     // config.addDataSourceProperty("connectTimeout", _) --> Property connectTimeout does not exist
@@ -91,7 +95,18 @@ object Debiki {
     // "If reading from the server takes longer than this value, the connection is closed".
     // "can be used as both a brute force global query timeout and a method of detecting
     // network problems". Seconds.
-    config.addDataSourceProperty("socketTimeout", TooSlowQuerySeconds)
+    //
+    // If too small (5 seconds is too small), the initial migration might fail, like so:
+    //    org.postgresql.util.PSQLException: An I/O error occurred while sending to the backend.
+    //        ...
+    //        at com.zaxxer.hikari.pool.HikariProxyStatement.execute(HikariProxyStatement.java)
+    //        ...
+    //        at org.flywaydb.core.internal.command.DbMigrate.doMigrate(DbMigrate.java:352)
+    //    Caused by: java.net.SocketTimeoutException: Read timed out
+    //        ...
+    // and this is hard to troubleshoot, because might happen only on computers with a little bit
+    // slower hardware.
+    config.addDataSourceProperty("socketTimeout", 15) // seconds
 
     config.setReadOnly(readOnly)
     config.setTransactionIsolation("TRANSACTION_SERIALIZABLE")

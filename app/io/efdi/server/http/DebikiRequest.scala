@@ -22,7 +22,6 @@ import debiki.DebikiHttp._
 import debiki._
 import debiki.dao.SiteDao
 import java.{util => ju}
-import io.efdi.server.Who
 import play.api.mvc
 import play.api.mvc.{Action => _, _}
 
@@ -63,6 +62,11 @@ abstract class DebikiRequest[A] {
 
   def browserIdIsNew = browserId.isNew
 
+  def spamRelatedStuff = SpamRelReqStuff(
+    userAgent = headers.get("User-Agent"),
+    referer = request.headers.get("referer"),
+    uri = uri)
+
   def theUser = user_!
   def theUserId = theUser.id
 
@@ -78,8 +82,6 @@ abstract class DebikiRequest[A] {
   def theRoleId = anyRoleId getOrElse throwForbidden("DwE86Wb7", "Not authenticated")
 
   def isGuest = user.exists(_.isGuest)
-  def isAuthenticated = user.exists(_.isAuthenticated)
-  def isApprovedOrStaff = user.exists(_.isApprovedOrStaff)
   def isStaff = user.exists(_.isStaff)
 
   def session: mvc.Session = request.session

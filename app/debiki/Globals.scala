@@ -22,19 +22,19 @@ import akka.pattern.gracefulStop
 import com.codahale.metrics
 import com.debiki.core._
 import com.debiki.core.Prelude._
-import com.debiki.dao.rdb.{RdbDaoFactory, Rdb}
+import com.debiki.dao.rdb.{Rdb, RdbDaoFactory}
 import com.github.benmanes.caffeine
 import com.zaxxer.hikari.HikariDataSource
 import debiki.DebikiHttp.throwForbidden
 import debiki.Globals.NoStateError
-import debiki.antispam.AntiSpam
+import ed.server.spam.{SpamCheckActor, SpamChecker}
 import debiki.dao._
 import debiki.dao.migrations.ScalaBasedMigrations
 import ed.server.search.SearchEngineIndexer
 import io.efdi.server.notf.Notifier
 import java.{lang => jl, net => jn}
 import java.util.concurrent.TimeUnit
-import io.efdi.server.pubsub.{PubSubApi, PubSub, StrangerCounterApi}
+import io.efdi.server.pubsub.{PubSub, PubSubApi, StrangerCounterApi}
 import org.{elasticsearch => es}
 import org.scalactic._
 import play.{api => p}
@@ -43,7 +43,7 @@ import play.api.Play
 import play.api.Play.current
 import redis.RedisClient
 import scala.concurrent.duration._
-import scala.concurrent.{Future, Await, TimeoutException}
+import scala.concurrent.{Await, Future, TimeoutException}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.matching.Regex
 import Globals._
@@ -58,10 +58,10 @@ object Globals extends Globals {
 
   class DatabasePoolInitializationException(cause: Exception) extends RuntimeException(cause)
 
-  val LocalhostUploadsDirConfigValueName = "debiki.uploads.localhostDir"
+  val LocalhostUploadsDirConfigValueName = "ed.uploads.localhostDir"
 
-  val FirstSiteHostnameConfigValue = "debiki.hostname"
-  val BecomeOwnerEmailConfigValue = "debiki.becomeOwnerEmailAddress"
+  val FirstSiteHostnameConfigValue = "ed.hostname"
+  val BecomeOwnerEmailConfigValue = "ed.becomeOwnerEmailAddress"
 
 }
 
@@ -152,7 +152,7 @@ class Globals {
   def forbiddenPassword: Option[String] = state.forbiddenPassword
 
 
-  def systemDao = state.systemDao  // [rename] to newSystemDao()?
+  def systemDao: SystemDao = state.systemDao  // [rename] to newSystemDao()?
 
 
   def siteDao(siteId: SiteId): SiteDao =  // [rename] to newSiteDao?
@@ -174,7 +174,7 @@ class Globals {
     }
   }
 
-  def antiSpam: AntiSpam = state.antiSpam
+  def spamChecker: SpamChecker = state.spamChecker
 
   def securityComplaintsEmailAddress = state.securityComplaintsEmailAddress
 
@@ -219,7 +219,7 @@ class Globals {
     def portParam = colonPortParam drop 1
     dieIf(colonPortParam.nonEmpty && colonPortParam != colonPort,
       "DwE47SK2", o"""Bad port: $portParam. You're accessing the server via non-standard
-        port $portParam, but then you need to edit/add config value `debiki.port=$portParam`,
+        port $portParam, but then you need to edit/add config value `ed.port=$portParam`,
         otherwise I won't know for sure which port to include in URLs I generate.""")
     s"$scheme://$hostname$colonPort"
   }
@@ -240,7 +240,7 @@ class Globals {
   // Hmm, in this way there'll be just one conf field:
   def config = state.config
 
-  def poweredBy = s"$scheme://www.debiki.com"
+  def poweredBy = s"https://www.effectivediscussions.org"
 
 
   /** If a hostname matches this pattern, the site id can be extracted directly from the url.
@@ -263,7 +263,7 @@ class Globals {
 
 
   def onServerStartup(app: p.Application) {
-    p.Logger.info("Starting... [EsM200HI]")
+    p.Logger.info("Starting... [EsM200HELLO]")
     wasTest // initialise it now
     if (_state ne null)
       throw new jl.IllegalStateException(o"""Server already running, was it not properly
@@ -282,7 +282,7 @@ class Globals {
     try {
       Await.ready(createStateFuture, (Play.isTest ? 99 | 5) seconds)
       if (killed) {
-        p.Logger.info("Killed. Bye. [EsM200KLD]")
+        p.Logger.info("Killed. Bye. [EsM200KILLED]")
         // Play.stop() has no effect, not from here directly, nor from within a Future {},
         // and Future { sleep(100ms); stop() } also doesn't work.
         //  play.api.Play.stop(app)  <-- nope
@@ -296,14 +296,15 @@ class Globals {
         // apparently ignores signals, once we've started (i.e. returned from this function).
       }
       else {
-        p.Logger.info("Started. [EsM200RDY]")
+        p.Logger.info("Started. [EsM200READY]")
       }
     }
     catch {
       case _: TimeoutException =>
         // We'll show a message in any browser that the server is starting, please wait
         // — that's better than a blank page? In case this takes long.
-        p.Logger.info("Still connecting to other services, starting anyway. [EsM200CRZY]")
+        p.Logger.info(
+          "Starting now, although not yet connected to all other services. Trying... [EsM200CRAZY]")
     }
   }
 
@@ -316,23 +317,33 @@ class Globals {
       if (!firsAttempt) {
         // Don't attempt to connect to everything too quickly, because then 100 MB log data
         // with "Error connecting to database ..." are quickly generated.
-        Thread.sleep(1500)
+        Thread.sleep(3000)
         if (killed)
           return
       }
       firsAttempt = false
-      p.Logger.info("Connecting to services... [EsM200CTS]")
+      val cache = makeCache
       try {
+        p.Logger.info("Connecting to database... [EsM200CONNDB]")
         val readOnlyDataSource = Debiki.createPostgresHikariDataSource(readOnly = true)
         val readWriteDataSource = Debiki.createPostgresHikariDataSource(readOnly = false)
-        val newState = new State(readOnlyDataSource, readWriteDataSource)
-        // Apply evolutions before we make the state available in _state, so nothing can
-        // access the database (via _state) before all evolutions have completed.
-        newState.systemDao.applyEvolutions()
+        val dbDaoFactory = new RdbDaoFactory(
+          new Rdb(readOnlyDataSource, readWriteDataSource), ScalaBasedMigrations, Play.isTest)
+
+        // Create any missing database tables before `new State`, otherwise State
+        // creates background threads that might attempt to access the tables.
+        p.Logger.info("Running database migrations... [EsM200MIGRDB]")
+        new SystemDao(dbDaoFactory, cache).applyEvolutions()
+
+        p.Logger.info("Done migrating database. Connecting to other services... [EsM200CONNOTR]")
+        val newState = new State(dbDaoFactory, cache)
+
         if (Play.isTest &&
-          Play.configuration.getBoolean("isTestShallEmptyDatabase").contains(true)) {
+            Play.configuration.getBoolean("isTestShallEmptyDatabase").contains(true)) {
+          p.Logger.info("Emptying database... [EsM200EMPTYDB]")
           newState.systemDao.emptyDatabase()
         }
+
         _state = Good(newState)
       }
       catch {
@@ -365,16 +376,17 @@ class Globals {
       return
 
     p.Logger.info("Shutting down... [EsM200BYE]")
-    state.readOnlyDataSource.close()
-    state.readWriteDataSource.close()
     // Shutdown the notifier before the mailer, so no notifications are lost
     // because there was no mailer that could send them.
     shutdownActorAndWait(state.notifierActorRef)
     shutdownActorAndWait(state.mailerActorRef)
     shutdownActorAndWait(state.renderContentActorRef)
     shutdownActorAndWait(state.indexerActorRef)
+    shutdownActorAndWait(state.spamCheckActorRef)
     state.elasticSearchClient.close()
     state.redisClient.quit()
+    state.dbDaoFactory.db.readOnlyDataSource.asInstanceOf[HikariDataSource].close()
+    state.dbDaoFactory.db.readWriteDataSource.asInstanceOf[HikariDataSource].close()
     _state = null
   }
 
@@ -386,11 +398,27 @@ class Globals {
   }
 
 
-  private class State(
-    val readOnlyDataSource: HikariDataSource,
-    val readWriteDataSource: HikariDataSource) {
+  /** Caffeine is a lot faster than EhCache, and it doesn't have annoying problems with
+    * a singleton that causes weird classloader related errors on Play app stop-restart.
+    * (For a super large out-of-process survive-restarts cache, we use Redis not EhCache.)
+    */
+  private def makeCache: DaoMemCache = caffeine.cache.Caffeine.newBuilder()
+    .maximumWeight(10*1000)  // change to config value, e.g. 1e9 = 1GB mem cache. Default to 50M?
+    .weigher[String, DaoMemCacheAnyItem](new caffeine.cache.Weigher[String, DaoMemCacheAnyItem] {
+    override def weigh(key: String, value: DaoMemCacheAnyItem): Int = {
+      // For now. Later, use e.g. size of cached HTML page + X bytes for fixed min size?
+      // Can use to measure size: http://stackoverflow.com/a/30021105/694469
+      //   --> http://openjdk.java.net/projects/code-tools/jol/
+      1
+    }
+  }).build()
 
-    val ShutdownTimeout = 30 seconds
+
+  private class State(
+    val dbDaoFactory: RdbDaoFactory,
+    val cache: DaoMemCache) {
+
+    val ShutdownTimeout = 5 seconds
 
     val config = new Config(conf)
 
@@ -417,26 +445,10 @@ class Globals {
 
     // Redis. (A Redis client pool makes sense if we haven't saturate the CPU on localhost, or
     // if there're many Redis servers and we want to round robin between them. Not needed, now.)
-    val redisHost = conf.getString("debiki.redis.host").noneIfBlank getOrElse "localhost"
+    val redisHost =
+      conf.getString("ed.redis.host").orElse(
+        conf.getString("debiki.redis.host")).noneIfBlank getOrElse "localhost"
     val redisClient = RedisClient(host = redisHost)(Akka.system)
-
-    val dbDaoFactory = new RdbDaoFactory(
-      new Rdb(readOnlyDataSource, readWriteDataSource), ScalaBasedMigrations, Play.isTest)
-
-    // Caffeine is a lot faster than EhCache, and it doesn't have annoying problems with
-    // a singleton that causes weird classloader related errors on Play app stop-restart.
-    // (For a super large out-of-process survive-restarts cache, we use Redis not EhCache.)
-    private val cache: DaoMemCache = caffeine.cache.Caffeine.newBuilder()
-      .maximumWeight(10*1000)  // change to config value, e.g. 1e9 = 1GB mem cache. Default to 50M?
-      .weigher[String, DaoMemCacheAnyItem](new caffeine.cache.Weigher[String, DaoMemCacheAnyItem] {
-        override def weigh(key: String, value: DaoMemCacheAnyItem): Int = {
-          // For now. Later, use e.g. size of cached HTML page + X bytes for fixed min size?
-          // Can use to measure size: http://stackoverflow.com/a/30021105/694469
-          //   --> http://openjdk.java.net/projects/code-tools/jol/
-          1
-        }
-      })
-      .build()
 
     // Online user ids are cached in Redis so they'll be remembered accross server restarts,
     // and will be available to all app servers. But we cache them again with more details here
@@ -483,17 +495,25 @@ class Globals {
     val indexerActorRef = SearchEngineIndexer.startNewActor(
       indexerBatchSize, indexerIntervalSeconds, elasticSearchClient, Akka.system, systemDao)
 
-    val nginxHost = conf.getString("debiki.nginx.host").noneIfBlank getOrElse "localhost"
+    def spamCheckBatchSize = conf.getInt("ed.spamcheck.batchSize") getOrElse 20
+    def spamCheckIntervalSeconds = conf.getInt("ed.spamcheck.intervalSeconds") getOrElse 1
+
+    val spamCheckActorRef = SpamCheckActor.startNewActor(
+      spamCheckBatchSize, spamCheckIntervalSeconds, Akka.system, systemDao)
+
+    val nginxHost =
+      conf.getString("ed.nginx.host").orElse(
+        conf.getString("debiki.nginx.host")).noneIfBlank getOrElse "localhost"
     val (pubSub, strangerCounter) = PubSub.startNewActor(Akka.system, nginxHost, redisClient)
 
     val renderContentActorRef = RenderContentService.startNewActor(Akka.system, siteDaoFactory)
 
-    val antiSpam = new AntiSpam()
-    antiSpam.start()
+    val spamChecker = new SpamChecker()
+    spamChecker.start()
 
     def systemDao: SystemDao = new SystemDao(dbDaoFactory, cache) // [rename] to newSystemDao()?
 
-    val applicationVersion = "0.00.33"  // later, read from some build config file
+    val applicationVersion = "0.00.38"  // later, read from some build config file
 
     val applicationSecret =
       conf.getString("play.crypto.secret").noneIfBlank.getOrDie(
@@ -502,13 +522,15 @@ class Globals {
     val applicationSecretNotChanged = applicationSecret == "changeme"
 
     val e2eTestPassword: Option[String] =
-      conf.getString("debiki.e2eTestPassword").noneIfBlank
+      conf.getString("ed.e2eTestPassword").noneIfBlank
 
     val forbiddenPassword: Option[String] =
-      conf.getString("debiki.forbiddenPassword").noneIfBlank
+      conf.getString("ed.forbiddenPassword").noneIfBlank
 
-    val secure = Play.configuration.getBoolean("debiki.secure") getOrElse {
-      p.Logger.info("Config value 'debiki.secure' missing; defaulting to true. [DwM3KEF2]")
+    val secure =
+      conf.getBoolean("ed.secure").orElse(
+        conf.getBoolean("debiki.secure")) getOrElse {
+      p.Logger.info("Config value 'ed.secure' missing; defaulting to true. [DwM3KEF2]")
       true
     }
 
@@ -521,7 +543,7 @@ class Globals {
         sys.props.get("testserver.port").map(_.toInt) getOrElse 19001
       }
       else {
-        Play.configuration.getInt("debiki.port") getOrElse {
+        conf.getInt("ed.port").orElse(conf.getInt("debiki.port")) getOrElse {
           if (secure) 443
           else 80
         }
@@ -530,7 +552,8 @@ class Globals {
 
     val baseDomainNoPort =
       if (Play.isTest) "localhost"
-      else conf.getString("debiki.baseDomain").noneIfBlank getOrElse "localhost"
+      else conf.getString("ed.baseDomain").orElse(
+        conf.getString("debiki.baseDomain")).noneIfBlank getOrElse "localhost"
 
     val baseDomainWithPort =
       if (secure && port == 443) baseDomainNoPort
@@ -539,15 +562,21 @@ class Globals {
 
 
     /** The hostname of the site created by default when setting up a new server. */
-    val firstSiteHostname = conf.getString(FirstSiteHostnameConfigValue).noneIfBlank
+    val firstSiteHostname = conf.getString(FirstSiteHostnameConfigValue).orElse(
+      conf.getString("debiki.hostname")).noneIfBlank
 
     if (firstSiteHostname.exists(_ contains ':'))
-      p.Logger.error("Config value debiki.hostname contains ':' [DwE4KUWF7]")
+      p.Logger.error("Config value ed.hostname contains ':' [DwE4KUWF7]")
 
-    val becomeFirstSiteOwnerEmail = conf.getString(BecomeOwnerEmailConfigValue).noneIfBlank
+    val becomeFirstSiteOwnerEmail = conf.getString(BecomeOwnerEmailConfigValue).orElse(
+      conf.getString("debiki.becomeOwnerEmailAddress")).noneIfBlank
 
-    val anyCreateSiteHostname = conf.getString("debiki.createSiteHostname").noneIfBlank
-    val anyCreateTestSiteHostname = conf.getString("debiki.createTestSiteHostname").noneIfBlank
+    val anyCreateSiteHostname =
+      conf.getString("ed.createSiteHostname").orElse(
+        conf.getString("debiki.createSiteHostname")).noneIfBlank
+    val anyCreateTestSiteHostname =
+      conf.getString("ed.createTestSiteHostname").orElse(
+        conf.getString("debiki.createTestSiteHostname")).noneIfBlank
 
     // The hostname must be directly below the base domain, otherwise
     // wildcard HTTPS certificates won't work: they cover 1 level below the
@@ -556,8 +585,9 @@ class Globals {
     val siteByIdHostnameRegex: Regex =
       s"""^$SiteByIdHostnamePrefix(.*)\\.$baseDomainNoPort$$""".r
 
-    val maxUploadSizeBytes = Play.configuration.getInt("debiki.uploads.maxKiloBytes").map(_ * 1000)
-      .getOrElse(3*1000*1000)
+    val maxUploadSizeBytes =
+      conf.getInt("ed.uploads.maxKiloBytes").orElse(
+        conf.getInt("debiki.uploads.maxKiloBytes").map(_ * 1000)).getOrElse(3*1000*1000)
 
     val anyUploadsDir = {
       import Globals.LocalhostUploadsDirConfigValueName
@@ -583,8 +613,9 @@ class Globals {
 
     val anyPublicUploadsDir = anyUploadsDir.map(_ + "public/")
 
-    val securityComplaintsEmailAddress = Play.configuration.getString(
-      "debiki.securityComplaintsEmailAddress").noneIfBlank
+    val securityComplaintsEmailAddress =
+      conf.getString("ed.securityComplaintsEmailAddress").orElse(
+        conf.getString("debiki.securityComplaintsEmailAddress")).noneIfBlank
   }
 
 }
@@ -614,7 +645,9 @@ class Config(conf: play.api.Configuration) {
     val maxSitesPerPerson = conf.getInt(s"$path.maxSitesPerIp") getOrElse 10
     val maxSitesTotal = conf.getInt(s"$path.maxSitesTotal") getOrElse 1000
     REFACTOR; RENAME // Later: rename to ed.createSite.newSiteQuotaMBs?
-    val quotaLimitMegabytes = conf.getInt("debiki.newSite.quotaLimitMegabytes")
+    val quotaLimitMegabytes =
+      conf.getInt("ed.newSite.quotaLimitMegabytes").orElse(
+        conf.getInt("debiki.newSite.quotaLimitMegabytes"))
   }
 
   object superAdmin {

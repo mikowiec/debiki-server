@@ -17,43 +17,37 @@
 
 /// <reference path="../../typedefs/react/react.d.ts" />
 /// <reference path="../plain-old-javascript.d.ts" />
+/// <reference path="../utils/utils.ts" />
 /// <reference path="../utils/react-utils.ts" />
 /// <reference path="../utils/DropdownModal.ts" />
 /// <reference path="../util/ExplainingDropdown.ts" />
 /// <reference path="../model.ts" />
+/// <reference path="../rules.ts" />
 /// <reference path="../Server.ts" />
+/// <reference path="../widgets.ts" />
 
 //------------------------------------------------------------------------------
    module debiki2.editor {
 //------------------------------------------------------------------------------
 
-var d = { i: debiki.internal, u: debiki.v0.util };
 var r = React.DOM;
-var reactCreateFactory = React['createFactory'];
-var ReactBootstrap: any = window['ReactBootstrap'];
-var Button = reactCreateFactory(ReactBootstrap.Button);
 var DropdownModal = utils.DropdownModal;
 var ExplainingListItem = util.ExplainingListItem;
 
 
 
-// Some dupl code, see PageRoleDropdown [7GKDF25]
 export var SelectCategoryDropdown = createClassAndFactory({
   getInitialState: function() {
     return {
       open: false,
-      buttonX: -1,
-      buttonY: -1,
     };
   },
 
   open: function() {
-    // Dupl code [7GKDF25]
-    var rect = ReactDOM.findDOMNode(this.refs.dropdownButton).getBoundingClientRect();
     this.setState({
       open: true,
-      buttonX: this.props.pullLeft ? rect.left : rect.right,
-      buttonY: rect.bottom
+      windowWidth: window.innerWidth,
+      buttonRect: reactGetRefRect(this.refs.dropdownButton),
     });
   },
 
@@ -86,14 +80,14 @@ export var SelectCategoryDropdown = createClassAndFactory({
     });
 
     var dropdownModal =
-      DropdownModal({ show: state.open, onHide: this.close, pullLeft: this.props.pullLeft,
-          atX: state.buttonX, atY: state.buttonY },
+      DropdownModal({ show: state.open, onHide: this.close, showCloseButton: true,
+          atRect: this.state.buttonRect, windowWidth: this.state.windowWidth },
         r.div({ className: 'esDropModal_header' }, "Select category:"),
         r.ul({},
           categoryListItems));
 
     return (
-      r.div({},
+      r.div({ style: { display: 'inline-block' } },
         dropdownButton,
         dropdownModal));
   }

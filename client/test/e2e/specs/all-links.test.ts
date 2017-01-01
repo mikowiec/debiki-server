@@ -10,8 +10,10 @@ import pages = require('../utils/pages');
 import settings = require('../utils/settings');
 import make = require('../utils/make');
 import logAndDie = require('../utils/log-and-die');
+import c = require('../test-constants');
 var logUnusual = logAndDie.logUnusual, die = logAndDie.die, dieIf = logAndDie.dieIf;
 var logMessage = logAndDie.logMessage;
+var SystemUserId = 1;  // [commonjs]
 
 declare var browser: any;
 
@@ -20,9 +22,7 @@ describe('all links', function() {
 
 
   it('create site with all links', function() {
-    var site: SiteData = make.emptySiteOwnedByOwen();
-    site.meta.localHostname = 'all-links-' + Date.now();
-
+    let site: SiteData = make.emptySiteOwnedByOwen();
     site.members.push(make.memberAdminAdam());
     site.members.push(make.memberAdminAlice());
     site.members.push(make.memberModeratorMons());
@@ -37,9 +37,9 @@ describe('all links', function() {
 
     var forumPage = make.page({
       id: 'fmp',
-      role: <PageRole> 7,  // [commonjs] PageRole.Forum
+      role: c.TestPageRole.Forum,
       categoryId: rootCategoryId,
-      authorId: -1,    // [commonjs] SystemUserId  [5KGEP02]
+      authorId: SystemUserId,
     });
     site.pages.push(forumPage);
 
@@ -85,9 +85,9 @@ describe('all links', function() {
 
     var whateverTopic = make.page({
       id: 'whateverTopic',
-      role: <PageRole> 12,  // [commonjs] PageRole.Discussion
+      role: c.TestPageRole.Discussion,
       categoryId: whateverCategory.id,
-      authorId: -1,    // [commonjs] SystemUserId
+      authorId: SystemUserId,
     });
     site.pages.push(whateverTopic);
 
@@ -108,9 +108,9 @@ describe('all links', function() {
 
     var questionTopic = make.page({
       id: 'questionTopic',
-      role: <PageRole> 10,  // [commonjs] PageRole.Question
+      role: c.TestPageRole.Question,
       categoryId: whateverCategory.id,
-      authorId: -1,    // [commonjs] SystemUserId
+      authorId: SystemUserId,
       // answerPostId
     });
     site.pages.push(questionTopic);
@@ -128,7 +128,7 @@ describe('all links', function() {
 
 
     var idAddress = server.importSiteData(site);
-    browser.go(idAddress.siteIdOrigin);
+    browser.go(idAddress.origin);
     // browser.assertTextMatches('body', /login as admin to create something/);
 
     browser.perhapsDebug();

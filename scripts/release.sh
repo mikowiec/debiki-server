@@ -93,9 +93,15 @@ sudo $test_containers down
 sudo rm -fr modules/ed-prod-one-test/data
 sudo $test_containers up -d
 
+if [ -n "`jobs`" ]; then
+  echo 'Other jobs running:'
+  jobs
+  echo 'Please stop them.'
+  die_if_in_script
+fi
+
 xvfb-run -s '-screen 0 1280x1024x8' \
   node_modules/selenium-standalone/bin/selenium-standalone start &
-selenium_pid=$!
 
 gulp build-e2e
 
@@ -105,7 +111,10 @@ if [ $? -ne 0 ]; then
   die_if_in_script
 fi
 
-kill $selenium_pid
+# This nills xvfb-run only:  kill $selenium_pid
+# Instead:
+kill %1
+
 sudo $test_containers down
 
 sudo docker ps # if anything is running, something is amiss?
@@ -116,6 +125,7 @@ sudo docker ps # if anything is running, something is amiss?
 
 # todo: don't do this if WIP version
 
+set -x
 
 sudo docker tag debiki/ed-app debiki/ed-app:$version_tag
 sudo docker tag debiki/ed-web debiki/ed-web:$version_tag
@@ -124,6 +134,8 @@ sudo docker tag debiki/ed-rdb debiki/ed-rdb:$version_tag
 sudo docker push debiki/ed-app:$version_tag
 sudo docker push debiki/ed-web:$version_tag
 sudo docker push debiki/ed-rdb:$version_tag
+
+set +x
 
 echo $version_tag >> modules/ed-versions/version-tags.log
 pushd .
