@@ -264,14 +264,17 @@ object PagePath {
    * Parses the path part of a URL into a PagePath.
    *
    * URL path examples:
-   * - (server)/fold/ers/-pageId-page-name
-   * - (server)/fold/ers/page-name (here, the pageId is not shown in the path).
+   * - (server)/fold/ers/-pageId/page-slug
+   * - (server)/fold/ers/page-slug (here, the pageId is not shown in the path).
    */
   def fromUrlPath(tenantId: String, path: String): PagePath.Parsed = {
     // For now, quick hack to match all forum paths. Later, compare with in-mem cached forum paths.
     var adjustedPath = path
     // If a forum is located at /:
-    if (path == "/categories" || path.startsWith("/latest") || path.startsWith("/top")) {
+    if (path == "/categories" ||
+        path == "/latest" || path == "/top" || path == "/new" || path == "/unread" ||
+        path.startsWith("/latest/") || path.startsWith("/top/") ||
+        path.startsWith("/new/") || path.startsWith("/unread/")) {
       adjustedPath = "/"
     }
     // If a forum is located at /forum/:  (but exclude /forum/-pageid/slug paths)
@@ -426,12 +429,12 @@ case class SitePageId(siteId: SiteId, pageId: PageId) {
   def toPrettyString = s"site $siteId, page $pageId"
 }
 
-case class SitePostId(siteId: SiteId, postId: UniquePostId) {
+case class SitePostId(siteId: SiteId, postId: PostId) {
   def toPrettyString = s"site $siteId, post $postId"
 }
 
 case class SiteIdAndPost(siteId: SiteId, post: Post) {
-  def toPrettyString = s"site $siteId, Post ${post.uniqueId}"
+  def toPrettyString = s"site $siteId, Post ${post.id}"
 }
 
 case class SitePageIdVersion(siteId: String, pageId: PageId, version: PageVersion)

@@ -36,6 +36,10 @@ trait AllSettings {
   def allowSignup: Boolean
   def allowLocalSignup: Boolean
   def allowGuestLogin: Boolean
+  def showCategories: Boolean
+  def showTopicFilterButton: Boolean
+  def showTopicTypes: Boolean
+  def selectTopicType: Boolean
   def numFirstPostsToReview: Int
   def numFirstPostsToApprove: Int
   def numFirstPostsToAllow: Int
@@ -54,7 +58,7 @@ trait AllSettings {
   def contribAgreement: ContribAgreement
   def contentLicense: ContentLicense
   def googleUniversalAnalyticsTrackingId: String
-  def showComplicatedStuff: Boolean
+  def showExperimental: Boolean
   def htmlTagCssClasses: String
 
   def numFlagsToHidePost: Int
@@ -76,6 +80,10 @@ trait AllSettings {
     allowSignup = Some(self.allowSignup),
     allowLocalSignup = Some(self.allowLocalSignup),
     allowGuestLogin = Some(self.allowGuestLogin),
+    showCategories = Some(self.showCategories),
+    showTopicFilterButton = Some(self.showTopicFilterButton),
+    showTopicTypes = Some(self.showTopicTypes),
+    selectTopicType = Some(self.selectTopicType),
     numFirstPostsToReview = Some(self.numFirstPostsToReview),
     numFirstPostsToApprove = Some(self.numFirstPostsToApprove),
     numFirstPostsToAllow = Some(self.numFirstPostsToAllow),
@@ -94,7 +102,7 @@ trait AllSettings {
     contribAgreement = Some(self.contribAgreement),
     contentLicense = Some(self.contentLicense),
     googleUniversalAnalyticsTrackingId = Some(self.googleUniversalAnalyticsTrackingId),
-    showComplicatedStuff = Some(self.showComplicatedStuff),
+    showExperimental = Some(self.showExperimental),
     htmlTagCssClasses = Some(self.htmlTagCssClasses),
     numFlagsToHidePost = Some(self.numFlagsToHidePost),
     cooldownMinutesAfterFlaggedHidden = Some(self.cooldownMinutesAfterFlaggedHidden),
@@ -114,13 +122,17 @@ object AllSettings {
     */
   val PostRecentlyCreatedLimitMs = 5 * 3600 * 1000
 
-  val Default = new AllSettings {
+  val Default = new AllSettings {  // [8L4KWU02]
     val userMustBeAuthenticated = false
     val userMustBeApproved = false
     val inviteOnly = false
     val allowSignup = true
     val allowLocalSignup = true
     val allowGuestLogin = false
+    val showCategories = true
+    val showTopicFilterButton = true
+    val showTopicTypes = true
+    val selectTopicType = true
     val numFirstPostsToReview = 1
     val numFirstPostsToApprove = 0
     val numFirstPostsToAllow = 0
@@ -143,7 +155,7 @@ object AllSettings {
     var contribAgreement = ContribAgreement.CcBy3And4
     var contentLicense = ContentLicense.CcBySa4
     val googleUniversalAnalyticsTrackingId = ""
-    val showComplicatedStuff = false
+    val showExperimental = false
     val htmlTagCssClasses = ""
     def numFlagsToHidePost = 3
     def cooldownMinutesAfterFlaggedHidden = 10
@@ -176,6 +188,10 @@ case class EffectiveSettings(
   def allowSignup: Boolean = firstInChain(_.allowSignup) getOrElse default.allowSignup
   def allowLocalSignup: Boolean = firstInChain(_.allowLocalSignup) getOrElse default.allowLocalSignup
   def allowGuestLogin: Boolean = firstInChain(_.allowGuestLogin) getOrElse default.allowGuestLogin
+  def showCategories: Boolean = firstInChain(_.showCategories) getOrElse default.showCategories
+  def showTopicFilterButton: Boolean = firstInChain(_.showTopicFilterButton) getOrElse default.showTopicFilterButton
+  def showTopicTypes: Boolean = firstInChain(_.showTopicTypes) getOrElse default.showTopicTypes
+  def selectTopicType: Boolean = firstInChain(_.selectTopicType) getOrElse default.selectTopicType
   def numFirstPostsToReview: Int = firstInChain(_.numFirstPostsToReview) getOrElse default.numFirstPostsToReview
   def numFirstPostsToApprove: Int = firstInChain(_.numFirstPostsToApprove) getOrElse default.numFirstPostsToApprove
   def numFirstPostsToAllow: Int = firstInChain(_.numFirstPostsToAllow) getOrElse default.numFirstPostsToAllow
@@ -194,7 +210,7 @@ case class EffectiveSettings(
   def contribAgreement: ContribAgreement = firstInChain(_.contribAgreement) getOrElse default.contribAgreement
   def contentLicense: ContentLicense = firstInChain(_.contentLicense) getOrElse default.contentLicense
   def googleUniversalAnalyticsTrackingId: String = firstInChain(_.googleUniversalAnalyticsTrackingId) getOrElse default.googleUniversalAnalyticsTrackingId
-  def showComplicatedStuff: Boolean = firstInChain(_.showComplicatedStuff) getOrElse default.showComplicatedStuff
+  def showExperimental: Boolean = firstInChain(_.showExperimental) getOrElse default.showExperimental
   def htmlTagCssClasses: String = firstInChain(_.htmlTagCssClasses) getOrElse default.htmlTagCssClasses
 
   def numFlagsToHidePost: Int = firstInChain(_.numFlagsToHidePost) getOrElse default.numFlagsToHidePost
@@ -232,6 +248,10 @@ object Settings2 {
       "allowSignup" -> JsBooleanOrNull(s.allowSignup),
       "allowLocalSignup" -> JsBooleanOrNull(s.allowLocalSignup),
       "allowGuestLogin" -> JsBooleanOrNull(s.allowGuestLogin),
+      "showCategories" -> JsBooleanOrNull(s.showCategories),
+      "showTopicFilterButton" -> JsBooleanOrNull(s.showTopicFilterButton),
+      "showTopicTypes" -> JsBooleanOrNull(s.showTopicTypes),
+      "selectTopicType" -> JsBooleanOrNull(s.selectTopicType),
       "numFirstPostsToReview" -> JsNumberOrNull(s.numFirstPostsToReview),
       "numFirstPostsToApprove" -> JsNumberOrNull(s.numFirstPostsToApprove),
       "numFirstPostsToAllow" -> JsNumberOrNull(s.numFirstPostsToAllow),
@@ -250,7 +270,7 @@ object Settings2 {
       "contribAgreement" -> JsNumberOrNull(s.contribAgreement.map(_.toInt)),
       "contentLicense" -> JsNumberOrNull(s.contentLicense.map(_.toInt)),
       "googleUniversalAnalyticsTrackingId" -> JsStringOrNull(s.googleUniversalAnalyticsTrackingId),
-      "showComplicatedStuff" -> JsBooleanOrNull(s.showComplicatedStuff),
+      "showExperimental" -> JsBooleanOrNull(s.showExperimental),
       "htmlTagCssClasses" -> JsStringOrNull(s.htmlTagCssClasses),
       "numFlagsToHidePost" -> JsNumberOrNull(s.numFlagsToHidePost),
       "cooldownMinutesAfterFlaggedHidden" -> JsNumberOrNull(s.cooldownMinutesAfterFlaggedHidden),
@@ -271,6 +291,10 @@ object Settings2 {
     allowSignup = anyBool(json, "allowSignup", d.allowSignup),
     allowLocalSignup = anyBool(json, "allowLocalSignup", d.allowLocalSignup),
     allowGuestLogin = anyBool(json, "allowGuestLogin", d.allowGuestLogin),
+    showCategories = anyBool(json, "showCategories", d.showCategories),
+    showTopicFilterButton = anyBool(json, "showTopicFilterButton", d.showTopicFilterButton),
+    showTopicTypes = anyBool(json, "showTopicTypes", d.showTopicTypes),
+    selectTopicType = anyBool(json, "selectTopicType", d.selectTopicType),
     numFirstPostsToReview = anyInt(json, "numFirstPostsToReview", d.numFirstPostsToReview),
     numFirstPostsToApprove = anyInt(json, "numFirstPostsToApprove", d.numFirstPostsToApprove),
     numFirstPostsToAllow = anyInt(json, "numFirstPostsToAllow", d.numFirstPostsToAllow),
@@ -293,7 +317,7 @@ object Settings2 {
       ContentLicense.fromInt(_) getOrElse throwBadRequest("EsE5YK28", "Invalid content license"))),
     googleUniversalAnalyticsTrackingId =
       anyString(json, "googleUniversalAnalyticsTrackingId", d.googleUniversalAnalyticsTrackingId),
-    showComplicatedStuff = anyBool(json, "showComplicatedStuff", d.showComplicatedStuff),
+    showExperimental = anyBool(json, "showExperimental", d.showExperimental),
     htmlTagCssClasses = anyString(json, "htmlTagCssClasses", d.htmlTagCssClasses),
     numFlagsToHidePost = anyInt(json, "numFlagsToHidePost", d.numFlagsToHidePost),
     cooldownMinutesAfterFlaggedHidden = anyInt(json, "cooldownMinutesAfterFlaggedHidden", d.cooldownMinutesAfterFlaggedHidden  ),

@@ -152,9 +152,9 @@ var staffBundleStatus;
 // Won't call callback() until a bit later — so if you call React's setState(..), the
 // state will have changed.
 //
-export function loadEditorEtcScriptsAndLater(callback?) {  // RENAME? to loadEditorAndMoreBundles
+export function loadEditorAndMoreBundles(callback?) {
   setTimeout(function() {
-    loadEditorEtceteraScripts().done(callback || _.noop)
+    loadEditorAndMoreBundlesGetDeferred().done(callback || _.noop)
   }, 0);
 }
 
@@ -188,7 +188,7 @@ export function loadStaffScriptsBundle(callback) {
   staffBundleStatus = $.Deferred();
   // The staff scripts bundle requires both more-bundle.js and editor-bundle.js (to render
   // previews of CommonMark comments [7PKEW24]). This'll load them both.
-  loadEditorEtcScriptsAndLater(() => {
+  loadEditorAndMoreBundles(() => {
     window['yepnope']({
       both: [d.i.assetUrlPrefix + 'staff-bundle.' + d.i.minMaxJs],
       complete: () => {
@@ -201,7 +201,7 @@ export function loadStaffScriptsBundle(callback) {
 }
 
 
-export function loadEditorEtceteraScripts() {
+export function loadEditorAndMoreBundlesGetDeferred() {
   if (loadEditorScriptsStatus)
     return loadEditorScriptsStatus;
 
@@ -286,16 +286,9 @@ export function stopRedirectingExtraHostnames(success: () => void) {
 
 export function loadSpecialContent(rootPageId: string, contentId: string,
       doneCallback: (any) => void) {
-  var url = '/-/load-special-content?rootPageId=' + (rootPageId ? rootPageId : '') +
+  let url = '/-/load-special-content?rootPageId=' + (rootPageId ? rootPageId : '') +
       '&contentId=' + contentId;
-  $.get(origin + url)
-    .done((content: any) => {
-      doneCallback(content);
-    })
-    .fail((x, y, z) => {
-      console.error('Error loading special content: ' + JSON.stringify([x, y, z]));
-      doneCallback(null);
-    });
+  get(url, doneCallback);
 }
 
 
@@ -432,7 +425,13 @@ export function makeImpersionateUserAtOtherSiteUrl(siteId: SiteId, userId: UserI
 export function impersonateGoToHomepage(userId: UserId) {
   postJsonSuccess('/-/impersonate?userId=' + userId, () => {
     location.assign('/');
+    // Don't: location.reload() — apparently that cancels assign(/) above.
   }, null);
+}
+
+
+export function viewAsOther(userId: UserId, success: () => void) {
+  postJsonSuccess(`/-/view-as-other?userId=${userId}`, success, null);
 }
 
 
@@ -444,7 +443,7 @@ export function stopImpersonatingReloadPage() {
 
 
 export function loadCompleteUser(userIdOrUsername: UserId | string,
-        doneCallback: (user: CompleteUser) => void, error?: () => void) {
+      doneCallback: (user: MemberInclDetails) => void, error?: () => void) {
   get('/-/load-user-incl-details?who=' + userIdOrUsername, (response) => {
     doneCallback(response.user);
   }, error);
@@ -452,7 +451,7 @@ export function loadCompleteUser(userIdOrUsername: UserId | string,
 
 
 export function listCompleteUsers(whichUsers,
-        doneCallback: (users: CompleteUser[]) => void) {
+        doneCallback: (users: MemberInclDetails[]) => void) {
   $.get(origin + '/-/list-complete-users?whichUsers=' + whichUsers)
     .done(response => {
       doneCallback(response.users);
@@ -474,25 +473,29 @@ export function sendInvite(toEmailAddress: string, success: (invite: Invite) => 
 }
 
 
-export function loadInvitesSentBy(userId: number, success: (invites: Invite[]) => void,
+export function loadInvitesSentBy(userId: UserId, success: (invites: Invite[]) => void,
         error: (message: string) => void) {
-  $.get(origin + '/-/list-invites?sentById=' + userId)
-    .done(response => {
-      success(response);
-    })
-    .fail((x, y, z) => {
-      console.error('Error loading invites: ' + JSON.stringify([x, y, z]));
-      error(x.responseText);
-    });
+  get('/-/load-invites?sentById=' + userId, response => {
+    ReactActions.patchTheStore({ usersBrief: response.users });
+    success(response.invites);
+  }, error);
 }
 
 
-export function setIsAdminOrModerator(userId: number, doWhat: string, success: () => void) {
+export function loadAllInvites(success: (invites: Invite[]) => void) {
+  get('/-/load-all-invites', response => {
+    ReactActions.patchTheStore({ usersBrief: response.users });
+    success(response.invites);
+  });
+}
+
+
+export function setIsAdminOrModerator(userId: UserId, doWhat: string, success: () => void) {
   postJsonSuccess('/-/set-is-admin-or-moderator', success, { userId: userId, doWhat: doWhat });
 }
 
 
-export function approveRejectUser(user: CompleteUser, doWhat: string, success: () => void) {
+export function approveRejectUser(user: MemberInclDetails, doWhat: string, success: () => void) {
   postJsonSuccess( '/-/approve-reject-user', success, {
     userId: user.id,
     doWhat: doWhat
@@ -500,7 +503,7 @@ export function approveRejectUser(user: CompleteUser, doWhat: string, success: (
 }
 
 
-export function suspendUser(userId: number, numDays: number, reason: string, success: () => void) {
+export function suspendUser(userId: UserId, numDays: number, reason: string, success: () => void) {
   postJsonSuccess('/-/suspend-user', success, {
     userId: userId,
     numDays: numDays,
@@ -509,12 +512,12 @@ export function suspendUser(userId: number, numDays: number, reason: string, suc
 }
 
 
-export function unsuspendUser(userId: number, success: () => void) {
+export function unsuspendUser(userId: UserId, success: () => void) {
   postJsonSuccess('/-/unsuspend-user', success, { userId: userId });
 }
 
 
-export function lockThreatLevel(userId: number, threatLevel: ThreatLevel, success: () => void) {
+export function lockThreatLevel(userId: UserId, threatLevel: ThreatLevel, success: () => void) {
   if (threatLevel) {
     postJsonSuccess('/-/lock-threat-level', () => {
       // ReactActions.patchTheStore();
@@ -543,18 +546,11 @@ export function savePageNoftLevel(newNotfLevel) {
 
 
 export function loadMyself(callback: (user: any) => void) {
-  $.get(origin + '/-/load-my-page-data?pageId=' + debiki2.ReactStore.getPageId())
-    .done((user: any) => {
-      callback(user);
-    })
-    .fail((x, y, z) => {
-      console.error('Error loading my page data: ' + JSON.stringify([x, y, z]));
-      callback(null);
-    });
+  get(`/-/load-my-page-data?pageId=${debiki2.ReactStore.getPageId()}`, callback);
 }
 
 
-export function loadNotifications(userId: number, upToWhenMs: number,
+export function loadNotifications(userId: UserId, upToWhenMs: number,
       success: (notfs: Notification[]) => void, error: () => void) {
   var query = '?userId=' + userId + '&upToWhenMs=' + upToWhenMs;
   get('/-/load-notifications' + query, success, error);
@@ -591,7 +587,7 @@ export function saveGuest(guest, success: () => void) {
 }
 
 
-export function blockGuest(postId: number, numDays: number, threatLevel: ThreatLevel,
+export function blockGuest(postId: PostId, numDays: number, threatLevel: ThreatLevel,
       success: () => void) {
   postJsonSuccess('/-/block-guest', success, {
     postId: postId,
@@ -662,16 +658,9 @@ export function listAllUsernames(prefix: string, doneCallback: (usernames: Brief
 }
 
 
-export function listUsernames(prefix: string, doneCallback: (usernames: BriefUser) => void) {
-  var url = origin + '/-/list-usernames?pageId='+ d.i.pageId + '&prefix='+ prefix;
-  $.get(url)
-    .done((response: any) => {
-      doneCallback(response);
-    })
-    .fail((x, y, z) => {
-      console.error('Error listing usernames: ' + JSON.stringify([x, y, z]));
-      doneCallback(null);
-    });
+export function listUsernames(prefix: string, success: (usernames: BriefUser) => void) {
+  let url = `/-/list-usernames?pageId=${d.i.pageId}&prefix=${prefix}`;
+  get(url, success);
 }
 
 
@@ -694,9 +683,9 @@ export function loadDraftAndGuidelines(writingWhat: WritingWhat, categoryId: num
 }
 
 
-export function loadCurrentPostText(postId: number,
+export function loadCurrentPostText(postNr: PostNr,
       doneCallback: (text: string, postUid: number, revisionNr: number) => void) {
-  get('/-/edit?pageId='+ d.i.pageId + '&postId='+ postId, (response: any) => {
+  get('/-/edit?pageId='+ d.i.pageId + '&postNr='+ postNr, (response: any) => {
     // COULD also load info about whether the user may apply and approve the edits.
     doneCallback(response.currentText, response.postUid, response.currentRevisionNr);
   });
@@ -730,11 +719,11 @@ export function saveVote(data, success: (updatedPost) => void) {
 }
 
 
-export function saveEdits(postId: number, text: string, doneCallback: () => void) {
+export function saveEdits(postNr: number, text: string, doneCallback: () => void) {
   postJson('/-/edit', {
     data: {
       pageId: d.i.pageId,
-      postId: postId,
+      postNr: postNr,
       text: text
     },
     success: (editedPost) => {
@@ -765,7 +754,7 @@ export function savePageTitleAndSettings(newTitle: string, settings: any, succes
 }
 
 
-export function loadLatestPostRevisions(postId: number,
+export function loadLatestPostRevisions(postId: PostId,
     success: (revisions: PostRevision[]) => void) {
   get('/-/load-post-revisions?postId=' + postId + '&revisionNr=LastRevision', success);
 }
@@ -773,7 +762,7 @@ export function loadLatestPostRevisions(postId: number,
 
 /** Loads revision revisionNr and some older revisions.
   */
-export function loadMorePostRevisions(postId: number, revisionNr: number,
+export function loadMorePostRevisions(postId: PostId, revisionNr: number,
     success: (revisions: PostRevision[]) => void) {
   get('/-/load-post-revisions?postId=' + postId + '&revisionNr=' + revisionNr, success);
 }
@@ -793,13 +782,13 @@ export function unpinPage(success: () => void) {
 }
 
 
-export function saveReply(postIds: number[], text: string, anyPostType: number,
+export function saveReply(postNrs: PostNr[], text: string, anyPostType: number,
     success: () => void) {
   postJson('/-/reply', {
     data: {
       pageId: d.i.pageId,
       pageUrl: d.i.iframeBaseUrl || undefined,
-      postIds: postIds,
+      postNrs: postNrs,
       postType: anyPostType || PostType.Normal,
       text: text
     },
@@ -914,13 +903,13 @@ export function loadPostsByAuthor(authorId: UserId, success: (response) => void,
 }
 
 
-export function flagPost(postId: string, flagType: string, reason: string, success: () => void) {
+export function flagPost(postNr: string, flagType: string, reason: string, success: () => void) {
   postJsonSuccess('/-/flag', (storePatch: StorePatch) => {
     ReactActions.patchTheStore(storePatch);
     if (success) success();
   }, {
     pageId: d.i.pageId,
-    postId: postId,
+    postNr: postNr,
     type: flagType,
     reason: reason
   });
@@ -932,11 +921,11 @@ export function hidePostInPage(postNr: number, hide: boolean, success: (postAfte
 }
 
 
-export function deletePostInPage(postId: number, repliesToo: boolean,
+export function deletePostInPage(postNr: number, repliesToo: boolean,
       success: (deletedPost) => void) {
   postJsonSuccess('/-/delete-post', success, {
     pageId: d.i.pageId,
-    postNr: postId,
+    postNr: postNr,
     repliesToo: repliesToo,
   });
 }
@@ -975,10 +964,10 @@ export function addRemovePostTags(postId: PostId, tags: string[], success: () =>
 }
 
 
-export function changePostType(postId: number, newType: PostType, success: () => void) {
+export function changePostType(postNr: number, newType: PostType, success: () => void) {
   postJsonSuccess('/-/change-post-type', success, {
     pageId: d.i.pageId,
-    postNr: postId,
+    postNr: postNr,
     newType: newType,
   });
 }
@@ -1082,7 +1071,7 @@ var longPollingState = {
 /**
  * Built for talking with Nginx and nchan, see: https://github.com/slact/nchan#long-polling
  */
-export function sendLongPollingRequest(userId: number, success: (event: any) => void,
+export function sendLongPollingRequest(userId: UserId, success: (event: any) => void,
       error: () => void) {
   dieIf(longPollingState.ongoingRequest, "Already long-polling the server [EsE7KYUX2]");
   var options: any = {

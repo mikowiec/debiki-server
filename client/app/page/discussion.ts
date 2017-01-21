@@ -25,6 +25,7 @@
 /// <reference path="../help/help.ts" />
 /// <reference path="../model.ts" />
 /// <reference path="../rules.ts" />
+/// <reference path="../widgets.ts" />
 /// <reference path="post-actions.ts" />
 /// <reference path="chat.ts" />
 /// <reference path="../more-bundle-not-yet-loaded.ts" />
@@ -51,7 +52,7 @@ export var TitleBodyComments = createComponent({
   makeHelpMessage: function(): HelpMessage {
     var store: Store = this.props.store;
     var me: Myself = store.me;
-    var bodyPost = store.allPosts[BodyId];
+    var bodyPost = store.postsByNr[BodyNr];
 
     if (store.pageRole === PageRole.Form && store.pageClosedAtMs)
       return { id: 'EsH4PK04', version: 1, content: r.div({},
@@ -139,7 +140,7 @@ export var TitleBodyComments = createComponent({
         return null;
       }
       else {
-        var isPageAuthor = bodyPost.authorIdInt === me.userId;
+        var isPageAuthor = bodyPost.authorId === me.id;
         if (isPageAuthor) {
           if (store.numPostsRepliesSection) {
             return { id: 'EdH5GUF2', version: 1, content: r.span({},
@@ -176,7 +177,7 @@ export var TitleBodyComments = createComponent({
         return null;
       }
       else {
-        var isPageAuthor = bodyPost.authorIdInt === me.userId;
+        var isPageAuthor = bodyPost.authorId === me.id;
         if (isPageAuthor) {
           if (store.numPostsRepliesSection) {
             return { id: 'EdH5P0WF2', version: 1, content: r.span({},
@@ -192,16 +193,13 @@ export var TitleBodyComments = createComponent({
                 r.p({},
                   "Proofread your text below, to make sure it asks for " +
                   "the right things and is easy to understand. To edit it, " +
-                  "click the edit icon (", r.span({ className: 'icon-edit' }),
-                  ") just below your post. — Thereafter, click Continue."),
+                  "click the edit icon (", r.span({ className: 'icon-edit' }), ") ",
+                  // People only see the edit icon for the title — try to fix this, by making
+                  // 'below' bold so they'll look below instead.
+                  r.b({}, "below"), " your post. — Thereafter, click Continue."),
                 r.a({ className: 's_UtxHelp_HaveAsked_ContinueB btn btn-primary',
                     href: '/record-a-video' }, "Continue")) };
           }
-        }
-        else {
-          return { id: 'EdH7YM21', version: 1, content: r.span({},
-            "Click ", r.b({}, "Give Critique"), " below, to critique this — then you'll " +
-            "get credits, which you can use to ask for critique yourself.") };
         }
       }
     }
@@ -228,7 +226,7 @@ export var TitleBodyComments = createComponent({
     var anyTitle = null;
     var pageRole: PageRole = store.pageRole;
     if (pageRole === PageRole.CustomHtmlPage || pageRole === PageRole.EmbeddedComments ||
-        store.rootPostId !== BodyPostId) {
+        store.rootPostId !== BodyNr) {
       // Show no title for the homepage — it should have its own custom HTML with
       // a title and other things.
       // Embedded comment pages have no title, only comments.
@@ -244,12 +242,12 @@ export var TitleBodyComments = createComponent({
         pageRole === PageRole.About || pageRole === PageRole.WebPage ||
         pageRole === PageRole.SpecialContent || pageRole === PageRole.Blog ||
         pageRole === PageRole.EmbeddedComments ||
-        store.rootPostId !== BodyPostId) {
+        store.rootPostId !== BodyNr) {
       // Show no author name or social links for these generic pages.
       // And show nothing if we're showing a comment not the article as the root post.
     }
     else {
-      var post = store.allPosts[store.rootPostId];
+      var post = store.postsByNr[store.rootPostId];
       var headerProps: any = _.clone(store);
       headerProps.post = post;
       anyPostHeader = PostHeader(headerProps);
@@ -278,7 +276,7 @@ export var Title = createComponent({
 
   scrollToAnswer: function() {
     debiki2.ReactActions.loadAndShowPost(this.props.pageAnswerPostNr);
-    debiki2['page'].addVisitedPosts(TitleId, this.props.pageAnswerPostNr);
+    debiki2['page'].addVisitedPosts(TitleNr, this.props.pageAnswerPostNr);
   },
 
   editTitle: function(event) {
@@ -295,7 +293,7 @@ export var Title = createComponent({
 
   render: function() {
     var store: Store = this.props;
-    var titlePost = store.allPosts[TitleId];
+    var titlePost = store.postsByNr[TitleNr];
     if (!titlePost)
       return null;
 
@@ -316,7 +314,7 @@ export var Title = createComponent({
 
     var anyShowForumInroBtn;
     if (!this.props.hideButtons && store.pageRole === PageRole.Forum && store.hideForumIntro) {
-      var introPost = store.allPosts[BodyId];
+      var introPost = store.postsByNr[BodyNr];
       if (introPost && !introPost.isBodyHidden) {
         // Don't show button too early — doing that would make server side and client side
         // React generated html differ.
@@ -402,12 +400,6 @@ export var Title = createComponent({
         icon = r.span({ className: iconClass + clickableClass, onClick: onClick,
             title: iconTooltip });
       }
-      else if (store.pageRole === PageRole.ToDo) {
-        var clickableClass = isStaffOrMyPage ? ' dw-clickable' : '';
-        var onClick = isStaffOrMyPage ? this.cycleIsDone : null;
-        icon = r.span({ className: iconClass + clickableClass, onClick: onClick,
-            title: iconTooltip });
-      }
       else if (store.pageRole === PageRole.FormalMessage) {
         icon = r.span({ className: 'icon-mail' });
         tooltip = "Personal message";
@@ -477,8 +469,8 @@ var RootPostAndComments = createComponent({
 
   onOrigPostReplyClick: function() {
     // Dupl code [69KFUW20]
-    debiki2.morebundle.loginIfNeededReturnToPost('LoginToComment', BodyId, function() {
-      editor.toggleWriteReplyToPost(BodyId, PostType.Normal);
+    debiki2.morebundle.loginIfNeededReturnToPost('LoginToComment', BodyNr, function() {
+      editor.toggleWriteReplyToPost(BodyNr, PostType.Normal);
     });
   },
 
@@ -496,16 +488,16 @@ var RootPostAndComments = createComponent({
 
   render: function() {
     var store: Store = this.props;
-    var allPosts: { [postId: number]: Post; } = this.props.allPosts;
+    var postsByNr: { [postNr: number]: Post; } = this.props.postsByNr;
     var me = store.me;
-    var rootPost: Post = allPosts[this.props.rootPostId];
+    var rootPost: Post = postsByNr[this.props.rootPostId];
     if (!rootPost)
       return r.p({}, '(Root post missing, id: ' + this.props.rootPostId +
-          ', these are present: ' + _.keys(allPosts) + ' [DwE8WVP4])');
-    var isBody = this.props.rootPostId === BodyPostId;
+          ', these are present: ' + _.keys(postsByNr) + ' [DwE8WVP4])');
+    var isBody = this.props.rootPostId === BodyNr;
     var pageRole: PageRole = this.props.pageRole;
     var threadClass = 'dw-t dw-depth-0' + horizontalCss(this.props.horizontalLayout);
-    var postIdAttr = 'post-' + rootPost.postId;
+    var postIdAttr = 'post-' + rootPost.nr;
     var postClass = 'dw-p';
     if (post_shallRenderAsHidden(rootPost)) postClass += ' s_P-Hdn';
     var postBodyClass = 'dw-p-bd';
@@ -570,15 +562,15 @@ var RootPostAndComments = createComponent({
     // On form submission pages, people don't see each others submissions, won't talk at all.
     if (store.pageRole === PageRole.FormalMessage || store.pageRole === PageRole.Form) {
       repliesAreFlat = true;
-      childIds = _.values(store.allPosts).map((post: Post) => post.postId);
+      childIds = _.values(store.postsByNr).map((post: Post) => post.nr);
     }
 
     var isSquashing = false;
 
     var threadedChildren = childIds.map((childId, childIndex) => {
-      if (childId === BodyId || childId === TitleId)
+      if (childId === BodyNr || childId === TitleNr)
         return null;
-      var child = allPosts[childId];
+      var child = postsByNr[childId];
       if (!child)
         return null; // deleted
       if (isSquashing && child.squash)
@@ -589,7 +581,7 @@ var RootPostAndComments = createComponent({
       var threadProps = _.clone(this.props);
       if (repliesAreFlat) threadProps.isFlat = true;
       threadProps.elemType = 'div';
-      threadProps.postId = childId;
+      threadProps.postId = childId;  // rename to .postNr, right?
       threadProps.index = childIndex;
       threadProps.depth = 1;
       threadProps.indentationDepth = 0;
@@ -612,7 +604,7 @@ var RootPostAndComments = createComponent({
     var hasChat = false; // hasChatSection(store.pageRole);
 
     var flatComments = []; /*
-    if (hasChat) _.each(store.allPosts, (child: Post, childId) => {
+    if (hasChat) _.each(store.postsByNr, (child: Post, childId) => {
       if (!child || child.postType !== PostType.Flat)
         return null;
       var threadProps = _.clone(this.props);
@@ -697,26 +689,26 @@ var SquashedThreads = createComponent({
   },
 
   render: function() {
-    var allPosts: { [postId: number]: Post; } = this.props.allPosts;
-    var post = allPosts[this.props.postId];
-    var parentPost = allPosts[post.parentId];
+    var postsByNr: { [postNr: number]: Post; } = this.props.postsByNr;
+    var post: Post = postsByNr[this.props.postId];
+    var parentPost: Post = postsByNr[post.parentNr];
 
     var arrows = debiki2.renderer.drawArrowsFromParent(
-      allPosts, parentPost, this.props.depth, this.props.index,
+      postsByNr, parentPost, this.props.depth, this.props.index,
       this.props.horizontalLayout, this.props.rootPostId, !!post.branchSideways);
 
     var baseElem = r[this.props.elemType];
     var depthClass = ' dw-depth-' + this.props.depth;
     var indentationDepthClass = ' dw-id' + this.props.indentationDepth;
     var is2dColumnClass = this.props.is2dTreeColumn ? ' dw-2dcol' : '';
-    var postIdDebug = debiki.debug ? '  #' + post.postId : '';
+    var postNrDebug = debiki.debug ? '  #' + post.nr : '';
 
     return (
       baseElem({ className: 'dw-t dw-ts-squashed' + depthClass + indentationDepthClass +
           is2dColumnClass },
         arrows,
         r.a({ className: 'dw-x-show', onClick: this.onClick },
-          "Click to show more replies" + postIdDebug)));
+          "Click to show more replies" + postNrDebug)));
   }
 });
 
@@ -733,14 +725,14 @@ var Thread = createComponent({
 
   render: function() {
     var store: Store = this.props;
-    var allPosts: { [postId: number]: Post; } = store.allPosts;
-    var post: Post = allPosts[this.props.postId];
+    var postsByNr: { [postNr: number]: Post; } = store.postsByNr;
+    var post: Post = postsByNr[this.props.postId];
     if (!post) {
       // This tree has been deleted.
       return null;
     }
 
-    var parentPost = allPosts[post.parentId];
+    var parentPost = postsByNr[post.parentNr];
     var deeper = this.props.depth + 1;
     var isFlat = this.props.isFlat;
     var isMindMap = store.pageRole === PageRole.MindMap;
@@ -750,9 +742,9 @@ var Thread = createComponent({
     // Draw arrows, but not to multireplies, because we don't know if they reply to `post`
     // or to other posts deeper in the thread.
     var arrows;
-    if (!post.multireplyPostIds.length && !isFlat) {
+    if (!post.multireplyPostNrs.length && !isFlat) {
       arrows = debiki2.renderer.drawArrowsFromParent(
-        allPosts, parentPost, this.props.depth, this.props.index,
+        postsByNr, parentPost, this.props.depth, this.props.index,
         this.props.horizontalLayout, this.props.rootPostId, thisPostSideways);
     }
 
@@ -765,7 +757,7 @@ var Thread = createComponent({
     var numDeletedChildren = 0;
     for (var i = 0; i < post.childIdsSorted.length; ++i) {
       var childId = post.childIdsSorted[i];
-      if (!allPosts[childId]) {
+      if (!postsByNr[childId]) {
         numDeletedChildren += 1;
       }
     }
@@ -775,7 +767,7 @@ var Thread = createComponent({
     var children = [];
     if (!post.isTreeCollapsed && !post.isTreeDeleted && !isFlat) {
       children = post.childIdsSorted.map((childId, childIndex) => {
-        var child = allPosts[childId];
+        var child = postsByNr[childId];
         if (!child)
           return null; // deleted
         if (isSquashingChildren && child.squash)
@@ -854,7 +846,7 @@ var Thread = createComponent({
       indentationDepthClass = ' dw-id' + this.props.indentationDepth;
     }
     var is2dColumnClass = this.props.is2dTreeColumn ? ' dw-2dcol' : '';
-    var multireplyClass = post.multireplyPostIds.length ? ' dw-mr' : '';
+    var multireplyClass = post.multireplyPostNrs.length ? ' dw-mr' : '';
     var collapsedClass = renderCollapsed ? ' dw-zd' : '';
 
     var branchSidewaysClass = horizontalCss(!!post.branchSideways);
@@ -910,7 +902,7 @@ export var Post = createComponent({
       else {
         // Disable for now. This sets quickUpdate = true, which makes isClientSideCollapsed
         // impossible to undo, for nearby threads. And not used anyway.
-        // debiki2.ReactActions.markPostAsRead(this.props.post.postId, true);
+        // debiki2.ReactActions.markPostAsRead(this.props.post.nr, true);
       }
     }
     if (props.onClick) {
@@ -920,14 +912,14 @@ export var Post = createComponent({
 
   onAnyActionClick: function() {
     // Disable for now. Not in use anyway and see comment in this.onClick above.
-    // debiki2.ReactActions.markPostAsRead(this.props.post.postId, true);
+    // debiki2.ReactActions.markPostAsRead(this.props.post.nr, true);
   },
 
   onMarkClick: function(event) {
     // Try to avoid selecting text:
     event.stopPropagation();
     event.preventDefault();
-    debiki2.ReactActions.cycleToNextMark(this.props.post.postId);
+    debiki2.ReactActions.cycleToNextMark(this.props.post.nr);
   },
 
   render: function() {
@@ -977,7 +969,7 @@ export var Post = createComponent({
     }
     else {
       if (!post.isApproved) {
-        var the = post.authorIdInt === me.userId ? 'Your' : 'The';
+        var the = post.authorId === me.id ? 'Your' : 'The';
         pendingApprovalElem = r.div({ className: 'dw-p-pending-mod',
             onClick: this.onUncollapseClick }, the, ' comment below is pending approval.');
       }
@@ -998,11 +990,11 @@ export var Post = createComponent({
     // that looks better (see PostHeader).
     var replyReceivers;
     if (!this.props.abbreviate && !isFlat && (
-          this.props.index > 0 || post.multireplyPostIds.length)) {
+          this.props.index > 0 || post.multireplyPostNrs.length)) {
       replyReceivers = ReplyReceivers({ store: store, post: post });
     }
 
-    var mark = me.marksByPostId[post.postId];
+    var mark = me.marksByPostId[post.nr];
     switch (mark) {
       case YellowStarMark: extraClasses += ' dw-p-mark-yellow-star'; break;
       case BlueStarMark: extraClasses += ' dw-p-mark-blue-star'; break;
@@ -1011,8 +1003,8 @@ export var Post = createComponent({
         // Don't add the below class before user specific data has been activated, otherwise
         // all posts would show a big black unread mark on page load, which looks weird.
         if (this.props.userSpecificDataAdded) {
-          var autoRead = me.postIdsAutoReadLongAgo.indexOf(post.postId) !== -1;
-          autoRead = autoRead || me.postIdsAutoReadNow.indexOf(post.postId) !== -1;
+          var autoRead = me.postIdsAutoReadLongAgo.indexOf(post.nr) !== -1;
+          autoRead = autoRead || me.postIdsAutoReadNow.indexOf(post.nr) !== -1;
           if (!autoRead) {
             extraClasses += ' dw-p-unread';
           }
@@ -1041,7 +1033,7 @@ export var Post = createComponent({
       unwantedCross = r.div({ className: 'dw-unwanted-cross' });
     }
 
-    var id = this.props.abbreviate ? undefined : 'post-' + post.postId;
+    var id = this.props.abbreviate ? undefined : 'post-' + post.nr;
 
     return (
       r.div({ className: 'dw-p ' + extraClasses, id: id,
@@ -1063,10 +1055,10 @@ var ReplyReceivers = createComponent({
     var store: Store = this.props.store;
     var multireplyClass = ' dw-mrrs'; // mrrs = multi reply receivers
     var thisPost: Post = this.props.post;
-    var repliedToPostIds = thisPost.multireplyPostIds;
+    var repliedToPostIds = thisPost.multireplyPostNrs;
     if (!repliedToPostIds || !repliedToPostIds.length) {
       multireplyClass = '';
-      repliedToPostIds = [thisPost.parentId];
+      repliedToPostIds = [thisPost.parentNr];
     }
     var receivers = [];
     for (var index = 0; index < repliedToPostIds.length; ++index) {
@@ -1076,20 +1068,20 @@ var ReplyReceivers = createComponent({
         // button in the chat section, and then replies to someone too.
         continue;
       }
-      var post = store.allPosts[repliedToId];
+      var post = store.postsByNr[repliedToId];
       if (!post) {
         receivers.push(r.i({ key: repliedToId }, 'Unknown [DwE4KFYW2]'));
         continue;
       }
       var author = store_getAuthorOrMissing(store, post);
       var link =
-        r.a({ href: '#post-' + post.postId, className: 'dw-rr', key: post.postId },
+        r.a({ href: '#post-' + post.nr, className: 'dw-rr', key: post.nr },
           author.username || author.fullName,
           // Append an up arrow to indicate that clicking the name will scroll up,
           // rather than opening an about-user dialog. ⬆ is Unicode upwards-black-arrow U+2B06.
           r.span({ className: '-RRs_RR_Aw' }, '⬆'));
       if (receivers.length) {
-        link = r.span({ key: post.postId }, ' and', link);
+        link = r.span({ key: post.nr }, ' and', link);
       }
       receivers.push(link);
     }
@@ -1121,14 +1113,15 @@ export var PostHeader = createComponent({
   render: function() {
     var store: Store = this.props;
     var post: Post = this.props.post;
+    let abbreviate = this.props.abbreviate;
     if (!post)
       return r.p({}, '(Post missing [DwE7IKW2])');
 
     if (isWikiPost(post)) {
-      if (this.props.abbreviate) {
+      if (abbreviate) {
         return r.div({ className: 'dw-p-hd' }, 'Wiki');
       }
-      if (this.props.is2dTreeColumn || post.isTreeCollapsed || post.postId === BodyPostId) {
+      if (this.props.is2dTreeColumn || post.isTreeCollapsed || post.nr === BodyNr) {
         return null;
       }
       // Show a collapse button for this wiki post, but no author name because this is
@@ -1136,8 +1129,7 @@ export var PostHeader = createComponent({
       return r.span({ className: 'dw-a-clps icon-up-open', onClick: this.onCollapseClick });
     }
 
-    var me: Myself = this.props.me;
-    var linkFn = this.props.abbreviate ? 'span' : 'a';
+    var linkFn = abbreviate ? 'span' : 'a';
 
     var anySolutionIcon = store.pageRole === PageRole.Question &&
         post.uniqueId === store.pageAnswerPostUniqueId
@@ -1149,21 +1141,6 @@ export var PostHeader = createComponent({
         store_getAuthorOrMissing(store, post);
     var showAvatar = this.props.depth > 1 || this.props.is2dTreeColumn;
     var anyAvatar = !showAvatar ? null : avatar.Avatar({ tiny: true, user: author });
-
-    // Username link: Some dupl code, see edit-history-dialog.ts & avatar.ts [88MYU2]
-    var authorUrl = '/-/users/' + post.authorId;
-    var guestClass = user_isGuest(author) ? ' esP_By_F-G' : '';
-    var guestMark = user_isGuest(author) ? '? ' : '';
-    var fullName = !author.fullName ? undefined :
-        r.span({ className: 'esP_By_F' + guestClass }, author.fullName + ' ' + guestMark);
-
-    var username = !author.username ? null :
-        r.span({ className: 'esP_By_U' },
-          r.span({ className: 'esP_By_U_at' }, '@'), author.username);
-
-    if (!fullName && !username) {
-      fullName = '(Unknown author)';
-    }
 
     var editInfo = null;
     if (post.lastApprovedEditAtMs) {
@@ -1183,16 +1160,16 @@ export var PostHeader = createComponent({
 
     var postId;
     var anyMark;
-    if (post.postId !== TitleId && post.postId !== BodyPostId) {
+    if (post.nr !== TitleNr && post.nr !== BodyNr) {
       if (debiki.debug) {
-        postId = r.span({ className: 'dw-p-link' }, '#' + post.postId);
+        postId = r.span({ className: 'dw-p-link' }, '#' + post.nr);
       }
 
       /* COULD: Later on, move the star to the right? Or to the action list? And
          to indicate that the computer has been read, paint a 3px border to the
          left of the header. And to indicate that the human has marked it as read,
          set the header's bg color to white.
-      var mark = user.marksByPostId[post.postId];
+      var mark = user.marksByPostId[post.nr];
       var starClass = ' icon-star';
       if (mark === ManualReadMark) {
         starClass = ' icon-star-empty';
@@ -1204,37 +1181,22 @@ export var PostHeader = createComponent({
       */
     }
 
-    var isPageBody = post.postId === BodyPostId;
+    var isPageBody = post.nr === BodyNr;
     var by = isPageBody ? 'By ' : '';
     var isBodyPostClass = isPageBody ? ' dw-ar-p-hd' : '';
-    var suspendedClass = ''; // post.authorSuspendedTill ? ' dw-suspended' : ''; // see below
-
-    var userLinkProps: any = {
-      className: 'dw-p-by esP_By' + suspendedClass,
-      onClick: this.props.abbreviate ? null : this.onUserClick,
-      href: authorUrl
-    };
-
-    /* Disable because the server doesn't rerender the page when the user is activated again.
-    if (post.authorSuspendedTill === 'Forever') {
-      userLinkProps.title = 'User banned';
-    }
-    else if (post.authorSuspendedTill) {
-      userLinkProps.title = 'User suspended until ' + dateTimeFix(post.authorSuspendedTill);
-    } */
 
     var is2dColumn = this.props.horizontalLayout && this.props.depth === 1;
     var collapseIcon = is2dColumn ? 'icon-left-open' : 'icon-up-open';
     var isFlat = this.props.isFlat;
     var toggleCollapsedButton =
-        is2dColumn || this.props.abbreviate || post.isTreeCollapsed || isPageBody || isFlat
+        is2dColumn || abbreviate || post.isTreeCollapsed || isPageBody || isFlat
           ? null
           : r.span({ className: 'dw-a-clps ' + collapseIcon, onClick: this.onCollapseClick });
 
     // For flat replies, show "In response to" here inside the header instead,
     // rather than above the header — that looks better.
     var inReplyTo;
-    if (!this.props.abbreviate && isFlat && (post.parentId || post.multireplyPostIds.length)) {
+    if (!abbreviate && isFlat && (post.parentNr || post.multireplyPostNrs.length)) {
       inReplyTo = ReplyReceivers({ store: store, post: post, comma: true });
     }
 
@@ -1248,7 +1210,8 @@ export var PostHeader = createComponent({
           anySolutionIcon,
           anyAvatar,
           by,
-          r[linkFn](userLinkProps, fullName, username),
+          UserName({ user: author, makeLink: !abbreviate,
+              onClick: abbreviate ? undefined : this.onUserClick }),
           // COULD add "Posted on ..." tooltip.
           this.props.exactTime ?
               timeExact(post.createdAtMs, timeClass) : timeAgo(post.createdAtMs, timeClass),
@@ -1264,7 +1227,7 @@ export var PostBody = createComponent({
   loadAndShow: function(event) {
     event.preventDefault();
     let post: Post = this.props.post;
-    ReactActions.loadAndShowPost(post.postId);
+    ReactActions.loadAndShowPost(post.nr);
   },
 
   render: function() {

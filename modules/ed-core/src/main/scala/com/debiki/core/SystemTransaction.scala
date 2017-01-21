@@ -72,7 +72,7 @@ trait SystemTransaction {
   // ----- Spam check queue
 
   def loadStuffToSpamCheck(limit: Int): StuffToSpamCheck
-  def deleteFromSpamCheckQueue(siteId: SiteId, postId: UniquePostId, postRevNr: Int)
+  def deleteFromSpamCheckQueue(siteId: SiteId, postId: PostId, postRevNr: Int)
 
   // ----- Testing
 
@@ -86,3 +86,6 @@ trait SystemTransaction {
 
 case class DuplicateHostnameException(hostname: String) extends QuickMessageException(
   s"Hostname already exists: '$hostname'")
+
+case class DuplicateUsernameException(username: String) extends QuickMessageException(
+  s"Username already exists: '$username'")

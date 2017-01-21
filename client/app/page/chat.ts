@@ -96,8 +96,8 @@ var TitleAndLastChatMessages = createComponent({
     var store: Store = this.props.store;
     var title = Title(store); // later: only if not scrolled down too far
 
-    var originalPost = store.allPosts[store.rootPostId];
-    var origPostAuthor = store.usersByIdBrief[originalPost.authorIdInt];
+    var originalPost = store.postsByNr[store.rootPostId];
+    var origPostAuthor = store.usersByIdBrief[originalPost.authorId];
     var headerProps: any = _.clone(store);
     headerProps.post = originalPost;
     var origPostHeader = PostHeader(headerProps); // { store: _, post: _ } would be better?
@@ -105,8 +105,8 @@ var TitleAndLastChatMessages = createComponent({
     var canScrollUpToFetchOlder = true;
 
     var messages = [];
-    _.each(store.allPosts, (post: Post) => {
-      if (post.postId === TitleId || post.postId === BodyId) {
+    _.each(store.postsByNr, (post: Post) => {
+      if (post.nr === TitleNr || post.nr === BodyNr) {
         // We show the title & body elsewhere.
         return;
       }
@@ -114,7 +114,7 @@ var TitleAndLastChatMessages = createComponent({
         messages.push(DeletedChatMessage({ key: post.uniqueId, store: store, post: post }));
         return;
       }
-      if (post.postId === FirstReplyNr) {
+      if (post.nr === FirstReplyNr) {
         // (COULD make this work also if post nr FirstReplyNr has been moved to another page
         // and hence will never be found. Fix by scrolling up, noticing that nothing was found,
         // and remove the you-can-scroll-up indicator?)
@@ -162,7 +162,7 @@ var ChatMessage = createComponent({
   edit: function() {
     this.setState({ isEditing: true });
     var post: Post = this.props.post;
-    editor.openEditorToEditPost(post.postId, (wasSaved, text) => {
+    editor.openEditorToEditPost(post.nr, (wasSaved, text) => {
       this.setState({ isEditing: false });
     });
   },
@@ -188,7 +188,7 @@ var ChatMessage = createComponent({
     //headerProps.stuffToAppend.push(
     //  r.button({ className: 'esC_M_MoreB icon-ellipsis', key: 'm' }, "more"));
     return (
-      r.div({ className: 'esC_M', id: 'post-' + post.postId },
+      r.div({ className: 'esC_M', id: 'post-' + post.nr },
         avatar.Avatar({ user: author }),
         PostHeader(headerProps), // { store: _, post: _, ... } would be better?
         PostBody({ store: store, post: post })));
@@ -200,7 +200,7 @@ var ChatMessage = createComponent({
 function DeletedChatMessage(props) {
   var post: Post = props.post;
   return (
-    r.div({ className: 'esC_M', id: 'post-' + post.postId, key: props.key },
+    r.div({ className: 'esC_M', id: 'post-' + post.nr, key: props.key },
       r.div({ className: 'dw-p-bd' },
         r.div({ className: 'dw-p-bd-blk' },
           "(Message deleted)"))));
@@ -294,7 +294,7 @@ var ChatMessageEditor = createComponent({
   },
 
   componentDidMount: function() {
-    Server.loadEditorEtcScriptsAndLater(() => {
+    Server.loadEditorAndMoreBundles(() => {
       if (this.isUnmounted) return;
       editor.startMentionsParser(this.refs.textarea, this.onTextEdited);
     });

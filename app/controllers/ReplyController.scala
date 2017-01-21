@@ -35,12 +35,12 @@ import scala.concurrent.Future
 object ReplyController extends mvc.Controller {
 
 
-  def handleReply = PostJsonAction(RateLimits.PostReply, maxLength = MaxPostSize) {
+  def handleReply = PostJsonAction(RateLimits.PostReply, maxBytes = MaxPostSize) {
         request: JsonPostRequest =>
     val body = request.body
     val pageId = (body \ "pageId").as[PageId]
     val anyPageUrl = (body \ "pageUrl").asOpt[String]
-    val replyToPostNrs = (body \ "postIds").as[Set[PostNr]]
+    val replyToPostNrs = (body \ "postNrs").as[Set[PostNr]]
     val text = (body \ "text").as[String].trim
     val wherePerhapsEmpty = (body \ "where").asOpt[String]
     val whereOpt = if (wherePerhapsEmpty == Some("")) None else wherePerhapsEmpty
@@ -71,7 +71,7 @@ object ReplyController extends mvc.Controller {
   }
 
 
-  def handleChatMessage = PostJsonAction(RateLimits.PostReply, maxLength = MaxPostSize) {
+  def handleChatMessage = PostJsonAction(RateLimits.PostReply, maxBytes = MaxPostSize) {
         request =>
     val body = request.body
     val pageId = (body \ "pageId").as[PageId]

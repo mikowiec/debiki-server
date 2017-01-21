@@ -42,7 +42,7 @@ export var TitleEditor = createComponent({
   },
 
   componentDidMount: function() {
-    Server.loadEditorEtcScriptsAndLater(() => {
+    Server.loadEditorAndMoreBundles(() => {
       if (!this.isMounted()) return;
       this.setState({ editorScriptsLoaded: true });
     });
@@ -129,12 +129,14 @@ export var TitleEditor = createComponent({
   },
 
   render: function() {
-    var store: Store = this.props;
-    var pageRole: PageRole = this.props.pageRole;
-    var titlePost: Post = this.props.allPosts[TitleId];
-    var titleText = titlePost.sanitizedHtml; // for now. TODO only allow plain text?
-    var user = this.props.user;
-    var isForumOrAboutOrMessage =
+    let store: Store = this.props;
+    let me: Myself = store.me;
+    let settings: SettingsVisibleClientSide = store.settings;
+    let pageRole: PageRole = this.props.pageRole;
+    let titlePost: Post = this.props.postsByNr[TitleNr];
+    let titleText = titlePost.sanitizedHtml; // for now. TODO only allow plain text?
+    let user = this.props.user;
+    let isForumOrAboutOrMessage =
       pageRole === PageRole.Forum || pageRole === PageRole.About || pageRole === PageRole.FormalMessage;
 
     if (!this.state.editorScriptsLoaded) {
@@ -187,7 +189,7 @@ export var TitleEditor = createComponent({
                 "into the <html><head><meta name='description' content='...'> attribute." }));
 
 
-      var anyUrlAndCssClassEditor = !store.settings.showComplicatedStuff ? null :
+      var anyUrlAndCssClassEditor = !store.settings.showExperimental ? null :
         r.div({ className: 'esTtlEdtr_urlSettings' },
           r.p({}, r.b({}, "Ignore this "), "— unless you understand URL addresses and CSS."),
           Input({ label: 'Page slug', type: 'text', ref: 'slugInput', className: 'dw-i-slug',
@@ -226,7 +228,7 @@ export var TitleEditor = createComponent({
           : r.a({ className: 'esTtlEdtr_openAdv icon-wrench', onClick: this.showLayoutAndSettings },
               "Layout and settings");
 
-    let existsAdvStuffToEdit = pageRole === PageRole.Forum || store.settings.showComplicatedStuff;
+    let existsAdvStuffToEdit = pageRole === PageRole.Forum || store.settings.showExperimental;
     let advancedStuffButton = !existsAdvStuffToEdit ||
         this.state.showComplicated || !user.isAdmin || pageRole === PageRole.FormalMessage
           ? null
@@ -237,7 +239,7 @@ export var TitleEditor = createComponent({
     if (isForumOrAboutOrMessage) {
       // About-category pages cannot be moved to other categories.
     }
-    else if (this.props.forumId) {
+    else if (this.props.forumId && settings_showCategories(settings, me)) {
       selectCategoryInput =
         Input({ type: 'custom', label: "Category", labelClassName: 'col-xs-2',
             wrapperClassName: 'col-xs-10' },
@@ -246,12 +248,13 @@ export var TitleEditor = createComponent({
             onCategorySelected: this.onCategoryChanged }));
     }
 
-    var selectTopicType = !page_mayChangeRole(pageRole) ? null :
+    var selectTopicType =
+        !page_mayChangeRole(pageRole) || !settings_selectTopicType(settings, me) ? null :
       Input({ type: 'custom', label: "Topic type", labelClassName: 'col-xs-2',
           wrapperClassName: 'col-xs-10' },
         editor.PageRoleDropdown({ store: store, pageRole: this.state.pageRole,
           onSelect: this.onPageRoleChanged, pullLeft: true,
-          complicated: store.settings.showComplicatedStuff,
+          complicated: store.settings.showExperimental,
           title: 'Topic type', className: 'esEdtr_titleEtc_pageRole',
           help: "Makes the topic behave differently. For example, topics of type " +
           "Question can be marked as solved, and Idea topics can be New, " +
@@ -259,12 +262,12 @@ export var TitleEditor = createComponent({
 
     var addBackForumIntroButton;
     if (this.props.pageRole === PageRole.Forum) {
-      var introPost = this.props.allPosts[BodyId];
+      var introPost = this.props.postsByNr[BodyNr];
       var hasIntro = introPost && introPost.sanitizedHtml && !introPost.isBodyHidden;
       if (!hasIntro) {
         addBackForumIntroButton =
             r.a({ className: 'icon-plus', onClick: () => {
-              ReactActions.setPostHidden(BodyId, false);
+              ReactActions.setPostHidden(BodyNr, false);
               debiki2.ReactActions.showForumIntro(true);
             }}, "Add forum intro text");
       }

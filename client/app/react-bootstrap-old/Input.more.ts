@@ -37,6 +37,7 @@ export var Input = createComponent({
     delete childProps.children;
     delete childProps.help;
     delete childProps.addonBefore;
+    delete childProps.className;
 
     if (props.type === 'select' || props.type === 'textarea') {
       childProps.componentClass = props.type;
@@ -47,9 +48,9 @@ export var Input = createComponent({
     let result;
     let isCheckbox = props.type === 'checkbox';
     let isRadio = props.type === 'radio';
-    if (isCheckbox || isRadio) {
+    if ((isCheckbox || isRadio) && !props.labelFirst) {
       result = (
-        r.div({ className: 'form-group' },
+        r.div({ className: 'form-group ' + (props.className || '') },
           r.div({ className: props.wrapperClassName },
             (isRadio ? Radio : Checkbox).call(null, childProps, props.label),
             r.span({ className: 'help-block' },
@@ -57,20 +58,31 @@ export var Input = createComponent({
     }
     else if (props.type === 'custom') {
       result = (
-        FormGroup({},
+        FormGroup({ className: this.props.className },
           props.label && ControlLabel({ className: props.labelClassName }, props.label),
           r.div({ className: props.wrapperClassName },
             props.children)));
     }
     else {
+      let theInput;
+      let anyHelp;
+      if (isCheckbox || isRadio) {
+        dieIf(!props.labelFirst, 'EdE2WR8L9');
+        // The help will become the checkbox label, so if it's clicked, the checkbox gets selected.
+        theInput = (isRadio ? Radio : Checkbox).call(null, childProps, props.help);
+      }
+      else {
+        theInput = FormControl(childProps, props.children);
+        anyHelp = props.help && HelpBlock({}, props.help);
+      }
       result = (
-        FormGroup({},
+        FormGroup({ className: this.props.className },
           props.label && ControlLabel({ className: props.labelClassName }, props.label),
           r.div({ className: props.wrapperClassName },
             r.div({ className: 'input-group' },
               addonBefore,
-              FormControl(childProps, props.children)),
-            props.help && HelpBlock({}, props.help))));
+              theInput),
+            anyHelp)));
     }
 
     return result;

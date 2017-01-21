@@ -106,14 +106,14 @@ export function userGetWatchbarTopicIds(user: Myself): PageId[] {
 }
 
 
-export function maySendInvites(user: Myself | CompleteUser): MayMayNot {
+export function maySendInvites(user: Myself | MemberInclDetails): MayMayNot {
   // Currently only admins may send invites.
   if (!user.isAdmin) return mayMayNot(false, "is not admin");
   return mayIndeed();
 }
 
 
-export function user_isMember(user: CompleteUser | BriefUser | Myself): boolean {
+export function user_isMember(user: MemberInclDetails | BriefUser | Myself): boolean {
   return user.id > MaxGuestId;
 }
 
@@ -121,25 +121,22 @@ export function isGuest(user) {  // try to remove
   return user_isGuest(user);
 }
 
-export function user_isGuest(user) {
-  // (Should rename userId to id.)
-  return user.id <= MaxGuestId ||  // if is a CompleteUser or Myself
-      user.userId <= MaxGuestId; // in case it's a User or BriefUser
+export function user_isGuest(user: MemberInclDetails | Myself | BriefUser) {
+  return user.id <= MaxGuestId;
 }
 
-export function userId_isGuest(userId) {
-  return userId <= MaxGuestId;  // if is a CompleteUser
+export function userId_isGuest(userId: UserId) {
+  return userId <= MaxGuestId;
 }
 
-export function isMember(user: Myself | CompleteUser): boolean {
+export function isMember(user: Myself | MemberInclDetails): boolean {
   if (!user) return false;
-  var id = user['id'] || user['userId'];
-  var member = id >= MinMemberId;
+  var member = user.id >= MinMemberId;
   //dieIf(isGuest(user) && member, 'EsE7YKU2');
   return member;
 }
 
-export function isStaff(user: Myself | CompleteUser) {
+export function isStaff(user: Myself | MemberInclDetails) {
   return user.isAdmin || user.isModerator;
 }
 

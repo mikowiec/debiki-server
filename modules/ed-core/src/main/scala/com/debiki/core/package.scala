@@ -30,7 +30,7 @@ package object core {
   type ActionId = Int
 
   // TODO rename to PostId.
-  type UniquePostId = Int
+  type PostId = Int
   val NoPostId = 0
 
   type PostNr = Int
@@ -91,6 +91,7 @@ package object core {
     def toJavaDate = new java.util.Date(unixMillis)
     def toUnixMillis = unixMillis
     def daysSince(other: When) = (unixMillis - other.unixMillis) / OneMinuteInMillis / 60 / 24
+    def daysBetween(other: When) = math.abs(daysSince(other))
     def hoursSince(other: When) = (unixMillis - other.unixMillis) / OneMinuteInMillis / 60
     def minutesSince(other: When) = (unixMillis - other.unixMillis) / OneMinuteInMillis
     def millisSince(other: When) = unixMillis - other.unixMillis
@@ -196,7 +197,7 @@ package object core {
     def page(siteId: SiteId, pageId: PageId): Option[PageMeta] =
       pagesBySitePageId.get(SitePageId(siteId, pageId))
 
-    def tags(siteId: SiteId, postId: UniquePostId): Set[TagLabel] =
+    def tags(siteId: SiteId, postId: PostId): Set[TagLabel] =
       tagsBySitePostId.getOrElse(SitePostId(siteId, postId), Set.empty)
 
     def isPageDeleted(siteId: SiteId, pageId: PageId) = {
@@ -220,7 +221,7 @@ package object core {
     spamCheckTasks: Seq[SpamCheckTask]) {
 
     def getPost(sitePostId: SitePostId): Option[Post] =
-      postsBySite.get(sitePostId.siteId).flatMap(_.find(_.uniqueId == sitePostId.postId))
+      postsBySite.get(sitePostId.siteId).flatMap(_.find(_.id == sitePostId.postId))
 
     def getUser(siteUserId: SiteUserId): Option[User] =
       usersBySite.get(siteUserId.siteId).flatMap(_.get(siteUserId.userId))
@@ -237,7 +238,7 @@ package object core {
 
   case class SpamCheckTask(
     siteId: SiteId,
-    postId: UniquePostId,
+    postId: PostId,
     postRevNr: Int,
     who: Who,
     requestStuff: SpamRelReqStuff) {
@@ -250,6 +251,9 @@ package object core {
 
   def ifThenSome[A](condition: Boolean, value: A) =
     if (condition) Some(value) else None
+
+
+  def isBlank(char: Char): Boolean = char <= ' '
 
 
   def isValidNonLocalEmailAddress(address: String): Boolean =

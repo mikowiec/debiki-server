@@ -331,9 +331,9 @@ export function updatePost(post) {
 
 
 export function changePostType(post: Post, newType: PostType, success: () => void) {
-  Server.changePostType(post.postId, newType, () => {
+  Server.changePostType(post.nr, newType, () => {
     success();
-    post = clonePost(post.postId);
+    post = clonePost(post.nr);
     post.postType = newType;
     ReactDispatcher.handleViewAction({
       actionType: actionTypes.UpdatePost,
@@ -402,7 +402,7 @@ export function uncollapsePost(post) {
 
 
 export function loadAndShowPost(postNr: PostNr, showChildrenToo?: boolean, callback?) {
-  let anyPost = debiki2.ReactStore.allData().allPosts[postNr];
+  let anyPost = debiki2.ReactStore.allData().postsByNr[postNr];
   if (!anyPost || _.isEmpty(anyPost.sanitizedHtml)) {
     Server.loadPostByNr(debiki.internal.pageId, postNr, (storePatch: StorePatch) => {
       patchTheStore(storePatch);
@@ -612,19 +612,19 @@ export function openPagePostNr(pageId: string, postNr: number) {
 }
 
 
-export function openUserProfile(userId: any) {
+export function openUserProfile(userId: UserId) {
   window.location.assign(linkToUserProfilePage(userId));
 }
 
 
-export function goToUsersNotifications(userId: any) {
+export function goToUsersNotifications(userId: UserId) {
   window.location.assign(linkToUserProfilePage(userId) + '/notifications');
 }
 
 
-export function writeMessage(userId: any) {
+export function writeMessage(userId: UserId) {
   // For now, until I've enabled react-router everywhere and won't have to reload the page.
-  location.assign(linkToUserProfilePage(userId) + '/activity#writeMessage');
+  location.assign(linkToUserProfilePage(userId) + '/activity/posts#writeMessage');
 }
 
 

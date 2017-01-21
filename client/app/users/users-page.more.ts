@@ -68,7 +68,7 @@ var UsersHomeComponent = React.createClass(<any> {
       var usernameOrId = this.props.params.usernameOrId;
       dieIf(/[^0-9]/.test(usernameOrId), 'Not a user id [EsE5YK0P2]');
       var toUserId = parseInt(usernameOrId);
-      var myUserId = ReactStore.getMe().userId;
+      var myUserId = ReactStore.getMe().id;
       dieIf(toUserId === myUserId, 'EsE7UMKW2');
       dieIf(userId_isGuest(toUserId), 'EsE6JKY20');
       editor.openToWriteMessage(toUserId);
@@ -140,16 +140,16 @@ var UserPageComponent = React.createClass(<any> {
     this.context.router.push('/-/users/' + this.props.params.usernameOrId + '/' + subPath);
   },
 
-  loadCompleteUser: function() {
+  loadCompleteUser: function(redirectToCorrectUsername) {
     var usernameOrId = this.props.params.usernameOrId;
     Server.loadCompleteUser(usernameOrId, (user) => {
       if (this.willUnmount) return;
       this.setState({ user: user });
       // 1) In case the user has changed his/her username, and userIdOrUsername is his/her *old*
-      // name, user.username will be the current name — then show the current name in the url.
+      // name, user.username will be the current name — then show current name in the url [8KFU24R].
       // Also 2) if user id specified, and the user is a member (they have usernames) show
       // username instead,
-      if (user.username && user.username !== usernameOrId) {
+      if (user.username && user.username !== usernameOrId && redirectToCorrectUsername !== false) {
         this.context.router.replace('/-/users/' + user.username);
       }
     }, () => {
@@ -162,13 +162,13 @@ var UserPageComponent = React.createClass(<any> {
   render: function() {
     let store: Store = this.state.store;
     let me: Myself = store.me;
-    let user = this.state.user;
+    let user: MemberInclDetails = this.state.user;
     if (!user || !me)
       return r.p({}, 'Loading...');
 
     dieIf(!this.props.routes || !this.props.routes[2] || !this.props.routes[2].path, 'EsE5GKUW2');
 
-    let showPrivateStuff = isStaff(me) || (me.isAuthenticated && me.userId === user.id);
+    let showPrivateStuff = isStaff(me) || (me.isAuthenticated && me.id === user.id);
 
     let activityNavItem =
       NavItem({ eventKey: 'activity', className: 'e_UP_ActivityB' }, "Activity");
@@ -216,7 +216,7 @@ var AvatarAboutAndButtons = createComponent({
   },
 
   componentDidMount: function() {
-    Server.loadEditorEtcScriptsAndLater(this.createUploadAvatarButton);
+    Server.loadEditorAndMoreBundles(this.createUploadAvatarButton);
   },
 
   selectAndUploadAvatar: function() {
@@ -294,11 +294,11 @@ var AvatarAboutAndButtons = createComponent({
   },
 
   render: function() {
-    var user = this.props.user;
+    var user: MemberInclDetails = this.props.user;
     var me: Myself = this.props.me;
     var suspendedInfo;
     if (user.suspendedAtEpoch) {
-      var whatAndUntilWhen = user.suspendedTillEpoch === 'Forever'
+      var whatAndUntilWhen = (<number | string> user.suspendedTillEpoch) === 'Forever'
           ? 'banned'
           : 'suspended until ' + moment(user.suspendedTillEpoch).format('YYYY-MM-DD HH:mm') + ' UTC';
       suspendedInfo = r.div({},
@@ -306,7 +306,7 @@ var AvatarAboutAndButtons = createComponent({
           'Reason: ' + user.suspendedReason);
     }
 
-    var isMe = me.userId === user.id;
+    var isMe = me.id === user.id;
     var isGuestInfo = null;
     if (isGuest(user)) {
       isGuestInfo = ' — a guest user, could be anyone';

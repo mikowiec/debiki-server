@@ -49,7 +49,7 @@ declare namespace debiki2 {
     function editNewForumPage(categoryId: number, role: PageRole);
     function openToEditChatTitleAndPurpose();
     function openToWriteChatMessage(text: string, onDone);
-    function openToWriteMessage(userId: number);
+    function openToWriteMessage(userId: UserId);
   }
 
   function reactGetRefRect(ref): Rect;
@@ -85,6 +85,7 @@ declare namespace debiki2 {
   var user_isGuest;
   var me_maySendDirectMessageTo;
   var page_isGroupTalk;
+  let store_getUserOrMissing;
   var store_thisIsMyPage;
   var hasErrorCode;
   var page_mayChangeRole;
@@ -111,6 +112,12 @@ declare namespace debiki2 {
   var linkToMyProfilePage;
 
   var anyForbiddenPassword;
+
+  function settings_showCategories(settings: SettingsVisibleClientSide, me: Myself): boolean;
+  function settings_showFilterButton(settings: SettingsVisibleClientSide, me: Myself): boolean;
+  function settings_showTopicTypes(settings: SettingsVisibleClientSide, me: Myself): boolean;
+  function settings_selectTopicType(settings: SettingsVisibleClientSide, me: Myself): boolean;
+
 
   namespace avatar {
     var Avatar;
@@ -148,6 +155,7 @@ declare namespace debiki2 {
   var MenuItem;
   var MenuItemLink;
   var MenuItemDivider;
+  var UserName;
 
   // More stuff, place where?
   //namespace reactelements {

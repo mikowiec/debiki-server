@@ -87,13 +87,29 @@ object ReactJson {
   }
 
 
+  def makeSettingsVisibleClientSideJson(settings: EffectiveSettings): JsObject = {
+    // Only include settings that differ from the default. Default settings: [8L4KWU02]
+    var json = Json.obj()
+    if (settings.inviteOnly) json += "inviteOnly" -> JsTrue
+    if (!settings.allowSignup) json += "allowSignup" -> JsFalse
+    if (!settings.allowLocalSignup) json += "allowLocalSignup" -> JsFalse
+    if (settings.isGuestLoginAllowed) json += "allowGuestLogin" -> JsTrue
+    if (settings.showExperimental) json += "showExperimental" -> JsTrue
+    if (!settings.showCategories) json += "showCategories" -> JsFalse
+    if (!settings.showTopicFilterButton) json += "showTopicFilterButton" -> JsFalse
+    if (!settings.showTopicTypes) json += "showTopicTypes" -> JsFalse
+    if (!settings.selectTopicType) json += "selectTopicType" -> JsFalse
+    json
+  }
+
+
   /** When a site has just been created, and has no contents.
     */
   def emptySiteJson(pageReq: PageRequest[_]): JsObject = {
     require(!pageReq.pageExists, "DwE7KEG2")
     require(pageReq.pagePath.value == HomepageUrlPath, "DwE8UPY4")
     val site = pageReq.dao.theSite()
-    val siteSettings = pageReq.dao.loadWholeSiteSettings()
+    val siteSettings = pageReq.dao.getWholeSiteSettings()
     val isFirstSiteAdminEmailMissing = site.status == SiteStatus.NoAdmin &&
       site.id == FirstSiteId && Globals.becomeFirstSiteOwnerEmail.isEmpty
 
@@ -105,9 +121,7 @@ object ReactJson {
       "isFirstSiteAdminEmailMissing" -> isFirstSiteAdminEmailMissing,
       "userMustBeAuthenticated" -> JsBoolean(siteSettings.userMustBeAuthenticated),
       "userMustBeApproved" -> JsBoolean(siteSettings.userMustBeApproved),
-      "settings" -> Json.obj(
-        "allowGuestLogin" -> JsBoolean(siteSettings.isGuestLoginAllowed),
-        "showComplicatedStuff" -> JsBoolean(siteSettings.showComplicatedStuff)),
+      "settings" -> makeSettingsVisibleClientSideJson(siteSettings),
       "pageId" -> pageReq.thePageId,
       "pageRole" -> JsNumber(pageReq.thePageRole.toInt),
       "pagePath" -> JsPagePath(pageReq.pagePath),
@@ -121,7 +135,7 @@ object ReactJson {
       "me" -> NoUserSpecificData,
       "rootPostId" -> JsNumber(PageParts.BodyNr),
       "usersByIdBrief" -> JsObject(Nil),
-      "allPosts" -> JsObject(Nil),
+      "postsByNr" -> JsObject(Nil),
       "topLevelCommentIdsSorted" -> JsArray(),
       "siteSections" -> JsArray(),
       "horizontalLayout" -> JsBoolean(false),
@@ -139,7 +153,7 @@ object ReactJson {
     // The json constructed here will be cached & sent to "everyone", so in this function
     // we always specify !isStaff and !restrictedOnly.
 
-    val socialLinksHtml = dao.loadWholeSiteSettings().socialLinksHtml
+    val socialLinksHtml = dao.getWholeSiteSettings().socialLinksHtml
     val page = PageDao(pageId, transaction)
     val pageParts = page.parts
     val posts =
@@ -172,7 +186,7 @@ object ReactJson {
         post.deletedStatus.onlyThisDeleted && pageParts.hasNonDeletedSuccessor(post.nr)))
     }
 
-    val tagsByPostId = transaction.loadTagsByPostId(interestingPosts.map(_.uniqueId))
+    val tagsByPostId = transaction.loadTagsByPostId(interestingPosts.map(_.id))
 
     var allPostsJson = interestingPosts map { post: Post =>
       numPosts += 1
@@ -180,7 +194,7 @@ object ReactJson {
         numPostsChatSection += 1
       else if (!post.isOrigPost && !post.isTitle)
         numPostsRepliesSection += 1
-      val tags = tagsByPostId(post.uniqueId)
+      val tags = tagsByPostId(post.id)
       post.nr.toString -> postToJsonImpl(post, page, tags)
     }
 
@@ -232,7 +246,7 @@ object ReactJson {
       idAndUser._1.toString -> JsUser(idAndUser._2)
     })
 
-    val siteSettings = dao.loadWholeSiteSettings()
+    val siteSettings = dao.getWholeSiteSettings()
     //val pageSettings = dao.loadSinglePageSettings(pageId)
     val horizontalLayout = page.role == PageRole.MindMap // || pageSettings.horizontalComments
     val is2dTreeDefault = false // pageSettings.horizontalComments
@@ -248,9 +262,7 @@ object ReactJson {
       // Later: move these two userMustBe... to settings {} too.
       "userMustBeAuthenticated" -> JsBoolean(siteSettings.userMustBeAuthenticated),
       "userMustBeApproved" -> JsBoolean(siteSettings.userMustBeApproved),
-      "settings" -> Json.obj(
-        "allowGuestLogin" -> JsBoolean(siteSettings.isGuestLoginAllowed),
-        "showComplicatedStuff" -> JsBoolean(siteSettings.showComplicatedStuff)),
+      "settings" -> makeSettingsVisibleClientSideJson(siteSettings),
       "pageId" -> pageId,
       "pageMemberIds" -> pageMemberIds,
       "categoryId" -> JsNumberOrNull(page.meta.categoryId),
@@ -285,7 +297,7 @@ object ReactJson {
       "me" -> NoUserSpecificData,
       "rootPostId" -> JsNumber(BigDecimal(anyPageRoot getOrElse PageParts.BodyNr)),
       "usersByIdBrief" -> usersByIdJson,
-      "allPosts" -> JsObject(allPostsJson), // COULD rename — doesn't contain all posts, if is chat
+      "postsByNr" -> JsObject(allPostsJson),
       "topLevelCommentIdsSorted" -> JsArray(topLevelCommentIdsSorted),
       "siteSections" -> makeSiteSectionsJson(dao),
       "horizontalLayout" -> JsBoolean(horizontalLayout),
@@ -305,16 +317,14 @@ object ReactJson {
 
   def makeSpecialPageJson(request: DebikiRequest[_], inclCategoriesJson: Boolean): JsObject = {
     val dao = request.dao
-    val siteSettings = dao.loadWholeSiteSettings()
+    val siteSettings = dao.getWholeSiteSettings()
     var result = Json.obj(
       "appVersion" -> Globals.applicationVersion,
       "siteId" -> JsString(dao.siteId),
       "siteStatus" -> request.dao.theSite().status.toInt,
       "userMustBeAuthenticated" -> JsBoolean(siteSettings.userMustBeAuthenticated),
       "userMustBeApproved" -> JsBoolean(siteSettings.userMustBeApproved),
-      "settings" -> Json.obj(
-        "allowGuestLogin" -> JsBoolean(siteSettings.isGuestLoginAllowed),
-        "showComplicatedStuff" -> JsBoolean(siteSettings.showComplicatedStuff)),
+      "settings" -> makeSettingsVisibleClientSideJson(siteSettings),
       // (WOULD move 'me' to the volatile json; suddenly having it here in the main json is
       // a bit surprising.) CLEAN_UP
       "me" -> userNoPageToJson(request),
@@ -342,7 +352,7 @@ object ReactJson {
       return (None, Nil)
     }
     val forumPageId = categoriesRootFirst.head.sectionPageId
-    dao.lookupPagePath(forumPageId) match {
+    dao.getPagePath(forumPageId) match {
       case None => (None, Nil)
       case Some(forumPath) =>
         val jsonRootFirst = categoriesRootFirst.map(makeForumOrCategoryJson(forumPath, _))
@@ -356,7 +366,7 @@ object ReactJson {
     val jsonObjs = for {
       pageId <- sectionPageIds
       // (We're not in a transaction, the page might be gone [transaction])
-      metaAndPath <- dao.loadPageMetaAndPath(pageId)
+      metaAndPath <- dao.getPagePathAndMeta(pageId)
     } yield {
       Json.obj(
         "pageId" -> metaAndPath.pageId,
@@ -402,8 +412,8 @@ object ReactJson {
     dao.readOnlyTransaction { transaction =>
       // COULD optimize: don't load the whole page, load only postNr and the author and last editor.
       val page = PageDao(pageId, transaction)
-      val post = page.parts.thePost(postNr)
-      val tags = transaction.loadTagsForPost(post.uniqueId)
+      val post = page.parts.thePostByNr(postNr)
+      val tags = transaction.loadTagsForPost(post.id)
       val json = postToJsonImpl(post, page, tags,
         includeUnapproved = includeUnapproved, showHidden = showHidden)
       (json, page.version)
@@ -501,13 +511,12 @@ object ReactJson {
       else post.lastApprovedEditAt
 
     var fields = Vector(
-      "uniqueId" -> JsNumber(post.uniqueId),
-      "postId" -> JsNumber(post.nr),
-      "parentId" -> post.parentNr.map(JsNumber(_)).getOrElse(JsNull),
-      "multireplyPostIds" -> JsArray(post.multireplyPostNrs.toSeq.map(JsNumber(_))),
+      "uniqueId" -> JsNumber(post.id),
+      "nr" -> JsNumber(post.nr),
+      "parentNr" -> post.parentNr.map(JsNumber(_)).getOrElse(JsNull),
+      "multireplyPostNrs" -> JsArray(post.multireplyPostNrs.toSeq.map(JsNumber(_))),
       "postType" -> JsNumberOrNull(postType),
-      "authorId" -> JsString(post.createdById.toString),  // COULD remove, but be careful when converting to int client side
-      "authorIdInt" -> JsNumber(post.createdById),  // Rename to authorId when it's been converted to int (the line above)
+      "authorId" -> JsNumber(post.createdById),
       "createdAtMs" -> JsDateMs(post.createdAt),
       "lastApprovedEditAtMs" -> JsDateMsOrNull(lastApprovedEditAtNoNinja),
       "numEditors" -> JsNumber(post.numDistinctEditors),
@@ -563,7 +572,7 @@ object ReactJson {
 
   /** Creates a dummy root post, needed when rendering React elements. */
   def embeddedCommentsDummyRootPost(topLevelComments: immutable.Seq[Post]) = Json.obj(
-    "postId" -> JsNumber(PageParts.BodyNr),
+    "nr" -> JsNumber(PageParts.BodyNr),
     "childIdsSorted" ->
       JsArray(Post.sortPostsBestFirst(topLevelComments).map(reply => JsNumber(reply.nr))))
 
@@ -764,7 +773,7 @@ object ReactJson {
     var numTalkToOthers = 0
     var numOther = 0
 
-    val postIds: Seq[UniquePostId] = notfs flatMap {
+    val postIds: Seq[PostId] = notfs flatMap {
       case notf: Notification.NewPost => Some(notf.uniquePostId)
       case _ => None
     }
@@ -804,7 +813,7 @@ object ReactJson {
 
 
   private def makeNotificationsJson(notf: Notification, pageTitlesById: Map[PageId, String],
-        postsById: Map[UniquePostId, Post], usersById: Map[UserId, User]): Option[JsObject] = {
+        postsById: Map[PostId, Post], usersById: Map[UserId, User]): Option[JsObject] = {
     Some(notf match {
       case notf: Notification.NewPost =>
         val post = postsById.getOrElse(notf.uniquePostId, {
@@ -856,9 +865,9 @@ object ReactJson {
             page.meta.pageRole == PageRole.Form ||
             page.meta.pageRole == PageRole.WebPage)) {  // hack. Try to remove + fix [3PF4GK] above
         val posts = page.parts.allPosts
-        val tagsByPostId = transaction.loadTagsByPostId(posts.map(_.uniqueId))
+        val tagsByPostId = transaction.loadTagsByPostId(posts.map(_.id))
         val postIdsAndJson: Seq[(String, JsValue)] = posts.toSeq.map { post =>
-          val tags = tagsByPostId(post.uniqueId)
+          val tags = tagsByPostId(post.id)
           post.nr.toString -> postToJsonImpl(post, page, tags, includeUnapproved = true)
         }
         val authors = transaction.loadUsers(posts.map(_.createdById).toSet)
@@ -946,7 +955,7 @@ object ReactJson {
         Json.obj(
           "pageId" -> post.pageId,
           "nr" -> post.nr,
-          "uniqueId" -> post.uniqueId,
+          "uniqueId" -> post.id,
           "createdBy" -> JsUserOrNull(usersById.get(post.createdById)),
           "currentSource" -> post.currentSource,
           "currRevNr" -> post.currentRevisionNr,
@@ -1131,7 +1140,7 @@ object ReactJson {
   }
 
 
-  def makeStorePatchForPosts(postIds: Set[UniquePostId], showHidden: Boolean, dao: SiteDao)
+  def makeStorePatchForPosts(postIds: Set[PostId], showHidden: Boolean, dao: SiteDao)
         : JsValue = {
     dao.readOnlyTransaction { transaction =>
       makeStorePatchForPosts(postIds, showHidden, transaction)
@@ -1139,7 +1148,7 @@ object ReactJson {
   }
 
 
-  def makeStorePatchForPosts(postIds: Set[UniquePostId], showHidden: Boolean,
+  def makeStorePatchForPosts(postIds: Set[PostId], showHidden: Boolean,
         transaction: SiteTransaction): JsValue = {
     val posts = transaction.loadPostsByUniqueId(postIds).values
     val tagsByPostId = transaction.loadTagsByPostId(postIds)
@@ -1162,13 +1171,15 @@ object ReactJson {
 
 
   @deprecated("now", "use makeStorePatchForPosts instead")
-  def makeStorePatch2(postId: UniquePostId, pageId: PageId, transaction: SiteTransaction)
+  def makeStorePatch2(postId: PostId, pageId: PageId, transaction: SiteTransaction)
         : JsValue = {
     // Warning: some similar code above [89fKF2]
     // Load the page so we'll get a version that includes postId, in case it was just added.
     val page = PageDao(pageId, transaction)
     val post = page.parts.postById(postId) getOrDie "EsE8YKPW2"
-    val tags = transaction.loadTagsForPost(post.uniqueId)
+    dieIf(post.pageId != pageId, "EdE4FK0Q2W", o"""Wrong page id: $pageId, was post $postId
+        just moved to page ${post.pageId} instead? Site: ${transaction.siteId}""")
+    val tags = transaction.loadTagsForPost(post.id)
     val author = transaction.loadTheUser(post.createdById)
     require(post.createdById == author.id, "EsE4JHKX1")
     val postJson = postToJsonImpl(post, page, tags, includeUnapproved = true, showHidden = true)
@@ -1190,7 +1201,7 @@ object ReactJson {
 
   ANNOYING // needs a transaction, because postToJsonImpl needs one. Try to remove
   private def makeStorePatch3(pageIdVersions: Iterable[PageIdVersion], posts: Iterable[Post],
-        tagsByPostId: Map[UniquePostId, Set[String]], users: Iterable[User])(
+        tagsByPostId: Map[PostId, Set[String]], users: Iterable[User])(
         transaction: SiteTransaction): JsValue = {
     require(posts.isEmpty || users.nonEmpty, "Posts but no authors [EsE4YK7W2]")
     val pageVersionsByPageIdJson =
@@ -1202,7 +1213,7 @@ object ReactJson {
         val posts = pageIdPosts._2
         val page = new PageDao(pageId, transaction)
         val postsJson = posts map { p =>
-          postToJsonImpl(p, page, tagsByPostId.getOrElse(p.uniqueId, Set.empty),
+          postToJsonImpl(p, page, tagsByPostId.getOrElse(p.id, Set.empty),
             includeUnapproved = false, showHidden = false)
         }
         pageId -> JsArray(postsJson.toSeq)

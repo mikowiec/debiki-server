@@ -23,8 +23,8 @@ debiki.window = $(window);
 debiki.scriptLoad = $.Deferred();
 debiki.FirstSiteId = '1';
 debiki.debug = window.location.search.indexOf('debug=true') >= 0;
-d.i.TitleId = 0;
-d.i.BodyId = 1;
+d.i.TitleNr = 0;
+d.i.BodyNr = 1;
 
 
 // Debiki convention: Dialog elem tabindexes should vary from 101 to 109.
@@ -42,14 +42,14 @@ keymaster.filter = function(event) {
 
 
 function fireLoginOrLogout() {
-  if (debiki2.ReactStore.getUser().isLoggedIn) {
+  if (debiki2.ReactStore.getMe().isLoggedIn) {
     d.i.refreshFormXsrfTokens();
   }
 };
 
 
 function handleLoginInOtherBrowserTab() {
-  var currentUser = debiki2.ReactStore.getUser();
+  var currentUser = debiki2.ReactStore.getMe();
   var sessionId = $.cookie('dwCoSid');
   if (currentUser.isLoggedIn) {
     if (sessionId) {

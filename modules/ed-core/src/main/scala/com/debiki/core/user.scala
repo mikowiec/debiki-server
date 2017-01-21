@@ -503,6 +503,11 @@ case class MemberInclDetails(
 
   require(User.isOkayUserId(id), "DwE077KF2")
   require(username.length >= 2, "DwE6KYU9")
+  require(!username.contains(isBlank _), "EdE8FKY07")
+  require(!emailAddress.contains(isBlank _), "EdE6FKU02")
+  require(fullName == fullName.map(_.trim), "EdE3WKD5F")
+  require(country == country.map(_.trim), "EdEZ8KP02")
+  require(!website.exists(_.contains(isBlank _)), "EdE4AB6GD")
   require(approvedAt.isDefined == approvedById.isDefined, "DwE0KEI4")
   require(approvedById.map(_ >= LowestNonGuestId) != Some(false), "DwE55UKH4")
   require(isApproved.isEmpty || (approvedById.isDefined && approvedAt.isDefined), "DwE4DKQ1")
@@ -591,6 +596,22 @@ case class MemberPreferences(
     username != member.username || fullName != member.fullName
   }
 
+}
+
+
+
+case class UsernameUsage(
+  username: String,
+  inUseFrom: When,
+  inUseTo: Option[When] = None,
+  userId: UserId,
+  firstMentionAt: Option[When] = None) {
+
+  require(!inUseTo.exists(_.unixMillis <= inUseFrom.unixMillis), "EdE7WKL42")
+  require(!firstMentionAt.exists(_.unixMillis < inUseFrom.unixMillis), "EdE2WKZ0A")
+  inUseTo foreach { toWhen =>
+    require(!firstMentionAt.exists(_.unixMillis > toWhen.unixMillis), "EdE7KG0S3")
+  }
 }
 
 

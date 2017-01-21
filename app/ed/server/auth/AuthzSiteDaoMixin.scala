@@ -32,8 +32,9 @@ trait AuthzSiteDaoMixin {
 
   /** Returns true/false, + iff false, a why-forbidden debug reason code.
     */
-  def maySeePageUseCache(pageMeta: PageMeta, user: Option[User]): (Boolean, String) = {
-    maySeePageImpl(pageMeta, user, anyTransaction = None)
+  def maySeePageUseCache(pageMeta: PageMeta, user: Option[User], maySeeUnlisted: Boolean = true)
+        : (Boolean, String) = {
+    maySeePageImpl(pageMeta, user, anyTransaction = None, maySeeUnlisted = maySeeUnlisted)
   }
 
 
@@ -58,8 +59,8 @@ trait AuthzSiteDaoMixin {
 
 
   private def maySeePageImpl(pageMeta: PageMeta, user: Option[User],
-        anyTransaction: Option[SiteTransaction]): (Boolean, String) = {
-    // delete other impl:  [2KWU043YU1]
+        anyTransaction: Option[SiteTransaction], maySeeUnlisted: Boolean = true)
+        : (Boolean, String) = {
     if (user.exists(_.isAdmin))
       return (true, "")
 
@@ -72,6 +73,8 @@ trait AuthzSiteDaoMixin {
             return (false, "EsE8YGK25-Staff-Only-Cat")
           if (categories.exists(_.isDeleted))
             return (false, "EdE5PK2WS-Cat-Deleted")
+          if (!maySeeUnlisted && categories.exists(_.unlisted))
+            return (false, "EdE6WKQ0-Unlisted")
         case None =>
         // Fine, as of now, let everyone view pages not placed in any category, by default.
       }
@@ -116,15 +119,17 @@ trait AuthzSiteDaoMixin {
   }
 
 
-  def maySeePostUseCache(post: Post, pageMeta: PageMeta, user: Option[User]): (Boolean, String) = {
-    maySeePostImpl(null, -1, user, anyPost = Some(post), anyPageMeta = Some(pageMeta),
+  def maySeePostUseCache(post: Post, pageMeta: PageMeta, user: Option[User],
+        maySeeUnlistedPages: Boolean): (Boolean, String) = {
+    maySeePostImpl(pageId = null, postNr = -1, user, anyPost = Some(post),
+      anyPageMeta = Some(pageMeta), maySeeUnlistedPages = maySeeUnlistedPages,
       anyTransaction = None)
   }
 
 
   def throwIfMayNotSeePost(post: Post, author: Option[User])(transaction: SiteTransaction) {
     val (may, debugCode) =
-      maySeePostImpl(post.pageId, post.nr, author, anyPost = Some(post),
+      maySeePostImpl(post.pageId, postNr = -1, author, anyPost = Some(post),
         anyTransaction = Some(transaction))
     if (!may)
       throwIndistinguishableNotFound(s"EdE4KFA20-$debugCode")
@@ -133,7 +138,8 @@ trait AuthzSiteDaoMixin {
 
   def maySeePostImpl(pageId: PageId, postNr: PostNr, user: Option[User],
         anyPost: Option[Post], anyPageMeta: Option[PageMeta] = None,
-        anyTransaction: Option[SiteTransaction]): (Boolean, String) = {
+        maySeeUnlistedPages: Boolean = true, anyTransaction: Option[SiteTransaction])
+        : (Boolean, String) = {
 
     require(anyPageMeta.isDefined ^ (pageId ne null), "EdE25KWU24")
     require(anyPost.isDefined ^ (postNr >= 0), "EdE3DJ8A0")
@@ -145,11 +151,14 @@ trait AuthzSiteDaoMixin {
       }
     }
 
-    val (maySeePage, debugCode) = maySeePageImpl(pageMeta, user, anyTransaction)
+    val (maySeePage, debugCode) = maySeePageImpl(pageMeta, user, anyTransaction,
+          maySeeUnlisted = maySeeUnlistedPages)
     if (!maySeePage)
       return (false, s"$debugCode-ABX94WN")
 
-    val post = anyPost orElse loadPost(pageId, postNr) getOrElse {
+    def thePageId = anyPageMeta.map(_.pageId) getOrElse pageId
+
+    val post = anyPost orElse loadPost(thePageId, postNr) getOrElse {
       return (false, "7URAZ8S-Post-Not-Found")
     }
 

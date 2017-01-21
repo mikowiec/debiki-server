@@ -53,7 +53,7 @@ export var AdminUserPageComponent = React.createClass(<any> {
   loadCompleteUser: function() {
     this.setState({ user: null });
     var params = this.props.params;
-    Server.loadCompleteUser(params.userId, (user) => {
+    Server.loadCompleteUser(params.userId, (user: MemberInclDetails) => {
       if (!this.isMounted()) return;
       this.setState({
         user: user
@@ -90,9 +90,9 @@ export var AdminUserPageComponent = React.createClass(<any> {
   },
 
   render: function() {
-    var user: CompleteUser = this.state.user;
-    var loggedInUser: Myself = this.props.loggedInUser;
-    var me = loggedInUser;
+    let store: Store = this.props.store;
+    var user: MemberInclDetails = this.state.user;
+    var me: Myself = store.me;
     if (!user)
       return r.p({}, 'Loading...');
 
@@ -105,7 +105,7 @@ export var AdminUserPageComponent = React.createClass(<any> {
       usernameAndFullName += ' (' + user.fullName + ')';
     }
 
-    var thatIsYou = user.id === loggedInUser.userId ? " — that's you" : null;
+    var thatIsYou = user.id === me.id ? " — that's you" : null;
 
     var suspendedText = user.suspendedTillEpoch
         ? 'from ' + moment(user.suspendedAtEpoch).format('YYYY-MM-DD') +
@@ -130,7 +130,7 @@ export var AdminUserPageComponent = React.createClass(<any> {
 
     var toggleAdminButton;
     var toggleModeratorButton;
-    if (loggedInUser.isAdmin && !thatIsYou && !userSuspendedNow) {
+    if (me.isAdmin && !thatIsYou && !userSuspendedNow) {
       toggleAdminButton = Button({ onClick: this.toggleIsAdmin },
           user.isAdmin ? 'Revoke Admin' : 'Grant Admin');
       toggleModeratorButton = Button({ onClick: this.toggleIsModerator },
@@ -238,7 +238,7 @@ var SuspendDialog = createComponent({
 
 var threatLevelDialog;
 
-function openThreatLevelDialog(user: CompleteUser, refreshCallback) {
+function openThreatLevelDialog(user: MemberInclDetails, refreshCallback) {
   if (!threatLevelDialog) {
     threatLevelDialog = ReactDOM.render(MemberThreatLevelDialog(), utils.makeMountNode());
   }
@@ -251,7 +251,7 @@ var MemberThreatLevelDialog = createComponent({
     return { isOpen: false };
   },
 
-  open: function(user: CompleteUser, refreshCallback) {
+  open: function(user: MemberInclDetails, refreshCallback) {
     this.setState({ isOpen: true, user: user, refreshCallback: refreshCallback });
   },
 
@@ -270,7 +270,7 @@ var MemberThreatLevelDialog = createComponent({
     if (!this.state.isOpen)
       return null;
 
-    var user: CompleteUser = this.state.user;
+    var user: MemberInclDetails = this.state.user;
 
     var threatLevelText = user.lockedThreatLevel
       ? "Threat level locked at: " + threatLevel_toString(user.lockedThreatLevel) +

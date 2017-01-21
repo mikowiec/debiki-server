@@ -37,11 +37,11 @@ class Application @Inject() extends mvc.Controller {
   }
 
 
-  def flag = PostJsonAction(RateLimits.FlagPost, maxLength = 2000) { request =>
+  def flag = PostJsonAction(RateLimits.FlagPost, maxBytes = 2000) { request =>
     val body = request.body
     val dao = request.dao
     val pageId = (body \ "pageId").as[PageId]
-    val postNr = (body \ "postId").as[PostNr]
+    val postNr = (body \ "postNr").as[PostNr]
     val typeStr = (body \ "type").as[String]
     val reason = (body \ "reason").as[String]
 
@@ -67,7 +67,7 @@ class Application @Inject() extends mvc.Controller {
 
     // If some posts got hidden, then rerender them as hidden, so the flagger sees they got hidden.
     val json = ReactJson.makeStorePatchForPosts(
-      postsHidden.map(_.uniqueId).toSet, showHidden = false, dao)
+      postsHidden.map(_.id).toSet, showHidden = false, dao)
     OkSafeJson(json)
   }
 

@@ -35,12 +35,12 @@ import scala.concurrent.ExecutionContext.Implicits.global
 object LoginAsGuestController extends mvc.Controller {
 
 
-  def loginGuest = AsyncPostJsonAction(RateLimits.Login, maxLength = 1000) { request =>
+  def loginGuest = AsyncPostJsonAction(RateLimits.Login, maxBytes = 1000) { request =>
     val json = request.body.as[JsObject]
     val name = (json \ "name").as[String].trim
     val email = (json \ "email").as[String].trim
 
-    val settings = request.dao.loadWholeSiteSettings()
+    val settings = request.dao.getWholeSiteSettings()
     if (!settings.isGuestLoginAllowed)
       throwForbidden("DwE4K5FW2", "Guest login disabled; you cannot login as guest here")
     if (User nameIsWeird name)

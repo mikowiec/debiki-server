@@ -28,7 +28,7 @@ var gulp = require('gulp');
 var newer = require('gulp-newer');
 var typeScript = require('gulp-typescript');
 var stylus = require('gulp-stylus');
-var minifyCSS = require('gulp-minify-css');
+var cleanCSS = require('gulp-clean-css');
 var concat = require('gulp-concat');
 var del = require('del');
 var rename = require("gulp-rename");
@@ -187,8 +187,7 @@ gulp.task('wrap-javascript', function () {
 
 var serverTypescriptProject = typeScript.createProject({
     target: 'ES5',
-    noExternalResolve: true,
-    out: 'server-bundle.js'
+    outFile: 'server-bundle.js'
 });
 
 
@@ -198,7 +197,7 @@ function compileServerTypescript() {
         'client/shared/plain-old-javascript.d.ts',
         'client/typedefs/**/*.ts'])
     .pipe(wrap(nextFileTemplate))
-    .pipe(typeScript(serverTypescriptProject));
+    .pipe(serverTypescriptProject());
 
   if (watchAndLiveForever) {
     typescriptStream.on('error', function() {
@@ -229,27 +228,23 @@ function compileServerTypescript() {
 
 
 var slimTypescriptProject = typeScript.createProject({
-    target: 'ES5',
-    noExternalResolve: true,
-    out: 'slim-typescript.js'
+  target: 'ES5',
+  outFile: 'slim-typescript.js'
 });
 
 var moreTypescriptProject = typeScript.createProject({
   target: 'ES5',
-  noExternalResolve: true,
-  out: 'more-typescript.js'
+  outFile: 'more-typescript.js'
 });
 
 var staffTypescriptProject = typeScript.createProject({
   target: 'ES5',
-  noExternalResolve: true,
-  out: 'staff-typescript.js'
+  outFile: 'staff-typescript.js'
 });
 
 var editorTypescriptProject = typeScript.createProject({
   target: 'ES5',
-  noExternalResolve: true,
-  out: 'editor-typescript.js'
+  outFile: 'editor-typescript.js'
 });
 
 
@@ -263,7 +258,7 @@ function compileFastTypescript() {
         'client/shared/plain-old-javascript.d.ts',
         'client/typedefs/**/*.ts'])
     .pipe(wrap(nextFileTemplate))
-    .pipe(typeScript(slimTypescriptProject));
+    .pipe(slimTypescriptProject());
   if (watchAndLiveForever) {
     stream.on('error', function() {
       console.log('\n!!! Error compiling slim TypeScript [EsE4GDTX8]!!!\n');
@@ -272,7 +267,7 @@ function compileFastTypescript() {
   return stream.pipe(gulp.dest('target/client/'));
 }
 
-function compileMoreTypescript(what, project) {
+function compileMoreTypescript(what, typescriptProject) {
   var stream = gulp.src([
     'client/app/**/*.d.ts',
     '!client/app/**/*.' + what + '.d.ts',
@@ -283,7 +278,7 @@ function compileMoreTypescript(what, project) {
     'client/shared/plain-old-javascript.d.ts',
     'client/typedefs/**/*.ts'])
     .pipe(wrap(nextFileTemplate))
-    .pipe(typeScript(project));
+    .pipe(typescriptProject());
   if (watchAndLiveForever) {
     stream.on('error', function() {
       console.log('\n!!! Error compiling ' + what + ' TypeScript [EsE3G6P8S]!!!\n');
@@ -385,10 +380,6 @@ gulp.task('compile-stylus', function () {
       currentDirectorySlash + 'client/app/variables.styl'],
   };
 
-  var minifyOpts = {
-    keepSpecialComments: 0
-  };
-
   function makeStyleStream(destDir, destFile, sourceFiles) {
     var stream = gulp.src(sourceFiles)
       .pipe(stylus(stylusOpts));
@@ -403,7 +394,7 @@ gulp.task('compile-stylus', function () {
     return stream
       .pipe(concat(destFile))
       .pipe(gulp.dest(destDir))
-      .pipe(minifyCSS(minifyOpts))
+      .pipe(cleanCSS())
       .pipe(header(copyrightAndLicenseBanner))
       .pipe(rename({ extname: '.min.css' }))
       .pipe(gulp.dest(destDir))
@@ -444,10 +435,11 @@ gulp.task('watch', ['default'], function() {
   gulp.watch(['client/**/*.ts', '!client/test/**/*.ts'] ,['compile-typescript-concat-scripts']).on('change', logChangeFn('TypeScript'));
   gulp.watch('client/**/*.js', ['wrap-javascript-concat-scripts']).on('change', logChangeFn('Javascript'));
   gulp.watch('client/**/*.styl', ['compile-stylus']).on('change', logChangeFn('Stylus'));
-  gulp.watch('client/test/e2e/**/*.ts', ['build-e2e']).on('change', logChangeFn('TypeScript test files'));
+  gulp.watch('tests/e2e/**/*.ts', ['build-e2e']).on('change', logChangeFn('end-to-end test files'));
+  gulp.watch('tests/security/**/*.ts', ['build-security-tests']).on('change', logChangeFn('security test files'));
 });
 
-gulp.task('default', ['compile-concat-scripts', 'compile-stylus', 'build-e2e'], function () {
+gulp.task('default', ['compile-concat-scripts', 'compile-stylus', 'build-e2e', 'build-security-tests'], function () {
 });
 
 
@@ -455,7 +447,11 @@ gulp.task('release', ['insert-prod-scripts', 'minify-scripts', 'compile-stylus']
 });
 
 
-// ---- Tests -------------------------------------------------------------
+
+// ------------------------------------------------------------------------
+//  End-to-end Tests
+// ------------------------------------------------------------------------
+
 
 gulp.task('clean-e2e', function () {
   return del([
@@ -466,7 +462,7 @@ gulp.task('compile-e2e-scripts', function() {
   var stream = gulp.src([
         'client/app/constants.ts',
         'client/app/model.ts',
-        'client/test/e2e/**/*ts'])
+        'tests/e2e/**/*ts'])
       .pipe(typeScript({
         declarationFiles: true,
         module: 'commonjs',
@@ -487,6 +483,40 @@ gulp.task('compile-e2e-scripts', function() {
 // Compiles TypeScript code in test/e2e/ and places it in target/e2e/transpiled/,
 //
 gulp.task('build-e2e', ['clean-e2e', 'compile-e2e-scripts'], function() {
+});
+
+
+
+// ------------------------------------------------------------------------
+//  Security tests
+// ------------------------------------------------------------------------
+
+gulp.task('clean-security-tests', function () {
+  return del([
+    'target/security-tests/**/*']);
+});
+
+gulp.task('compile-security-tests', function() {
+  var stream = gulp.src([
+    //'tests/sync-tape.ts',
+    'tests/security/**/*.ts'])
+    .pipe(typeScript({
+      declarationFiles: true,
+      module: 'commonjs',
+    }));
+  // stream.dts.pipe(gulp.dest('target/e2e/...')); — no, don't need d.ts files
+  if (watchAndLiveForever) {
+    stream.on('error', function() {
+      console.log('\n!!! Error compiling security tests TypeScript !!!\n');
+    });
+  }
+  return stream.js
+  // .pipe(sourcemaps.write('.', { sourceRoot: '../../../../externalResolve/' }))
+    .pipe(gulp.dest('target/security-tests'));
+});
+
+
+gulp.task('build-security-tests', ['clean-security-tests', 'compile-security-tests'], function() {
 });
 
 

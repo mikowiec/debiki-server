@@ -48,7 +48,7 @@ var DeletePostDialog = createComponent({
     return {
       isOpen: false,
       post: null,
-      loggedInUser: debiki2.ReactStore.getUser()
+      loggedInUser: debiki2.ReactStore.getMe()
     };
   },
 
@@ -62,7 +62,7 @@ var DeletePostDialog = createComponent({
 
   doDelete: function() {
     var repliesToo = $('#deleteRepliesTooInput').is(':checked');
-    ReactActions.deletePost(this.state.post.postId, repliesToo, this.close);
+    ReactActions.deletePost(this.state.post.nr, repliesToo, this.close);
   },
 
   render: function () {
@@ -71,7 +71,7 @@ var DeletePostDialog = createComponent({
     if (this.state.isOpen) {
       var me: Myself = this.state.loggedInUser;
       var post: Post = this.state.post;
-      var isMyPost = me.id === post.authorIdInt;
+      var isMyPost = me.id === post.authorId;
       var yourOrThis = isMyPost ? "your" : "this";
       title = "Delete " + yourOrThis + " post?";
       content = !isStaff(me) ? null :

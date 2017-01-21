@@ -51,8 +51,8 @@ export let UsersActivityComponent = React.createClass(<any> {
          r.div({ className: 's_UP_Act_Nav' },
            Nav({ bsStyle: 'pills', activeKey: activeRouteName,
                onSelect: this.transitionTo, className: 'dw-sub-nav nav-stacked' },
-             NavItem({ eventKey: 'posts' }, "Posts"),
-             NavItem({ eventKey: 'topics' }, "Topics"))),
+             NavItem({ eventKey: 'posts', className: 's_UP_Act_Nav_PostsB' }, "Posts"),
+             NavItem({ eventKey: 'topics', className: 's_UP_Act_Nav_TopicsB' }, "Topics"))),
              //NavItem({ eventKey: 'likes-given' }, "Likes Given"),
              //NavItem({ eventKey: 'likes-received' }, "Likes Received"))),
          r.div({ className: 's_UP_Act_List' },
@@ -68,23 +68,23 @@ export let PostsComponent = React.createClass(<any> {
   },
 
   componentDidMount: function() {
-    let user: CompleteUser = this.props.user;
+    let user: MemberInclDetails = this.props.user;
     this.loadPosts(user.id);
   },
 
   componentWillReceiveProps: function(nextProps) {
     // a bit dupl code [5AWS2E9]
     let me: Myself = this.props.store.me;
-    let user: CompleteUser = this.props.user;
+    let user: MemberInclDetails = this.props.user;
     let nextMe: Myself = nextProps.store.me;
-    let nextUser: CompleteUser = nextProps.user;
+    let nextUser: MemberInclDetails = nextProps.user;
     // If we log in as someone else, which posts we may see might change.
-    if (me.userId !== nextMe.userId || user.id !== nextUser.id) {
+    if (me.id !== nextMe.id || user.id !== nextUser.id) {
       this.loadPosts(nextUser.id);
     }
   },
 
-  loadPosts: function(userId: number) {
+  loadPosts: function(userId: UserId) {
     let me: Myself = this.props.store.me;
     Server.loadPostsByAuthor(userId, (response: any) => {
       this.setState({
@@ -106,10 +106,14 @@ export let PostsComponent = React.createClass(<any> {
       return (
         r.p({}, "Loading ..."));
 
+    if (_.isEmpty(posts))
+      return (
+        r.p({}, "No posts."));
+
     let postElems = posts.map((post: PostWithPage) => {
       return (
-        r.li({ key: post.postId, className: 's_UP_Act_Ps_P' },
-          r.a({ href: linkToPostNr(post.pageId, post.postId),
+        r.li({ key: post.uniqueId, className: 's_UP_Act_Ps_P' },
+          r.a({ href: linkToPostNr(post.pageId, post.nr),
               className: 's_UP_Act_Ps_P_Link ' + pageRole_iconClass(post.pageRole) },
             post.pageTitle),
           avatar.Avatar({ user: author }),
@@ -129,23 +133,23 @@ export let TopicsComponent = React.createClass(<any> {
   },
 
   componentDidMount: function() {
-    let user: CompleteUser = this.props.user;
+    let user: MemberInclDetails = this.props.user;
     this.loadTopics(user.id);
   },
 
   componentWillReceiveProps: function(nextProps) {
     // a bit dupl code [5AWS2E9]
     let me: Myself = this.props.store.me;
-    let user: CompleteUser = this.props.user;
+    let user: MemberInclDetails = this.props.user;
     let nextMe: Myself = nextProps.store.me;
-    let nextUser: CompleteUser = nextProps.user;
+    let nextUser: MemberInclDetails = nextProps.user;
     // If we log in as someone else, which topics we may see might change.
-    if (me.userId !== nextMe.userId || user.id !== nextUser.id) {
+    if (me.id !== nextMe.id || user.id !== nextUser.id) {
       this.loadTopics(nextUser.id);
     }
   },
 
-  loadTopics: function(userId: number) {
+  loadTopics: function(userId: UserId) {
     Server.loadTopicsByUser(userId, (topics: Topic[]) => {
       this.setState({ topics: topics });
     });

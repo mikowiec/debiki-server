@@ -42,7 +42,7 @@ object ForumController extends mvc.Controller {
   val NumTopicsToList = 40
 
 
-  def createForum = StaffPostJsonAction(maxLength = 200) { request =>
+  def createForum = StaffPostJsonAction(maxBytes = 200) { request =>
     val title = (request.body \ "title").as[String]
     val folder = (request.body \ "folder").as[String]
     val pagePath = request.dao.createForum(title, folder = folder, request.who).pagePath
@@ -58,7 +58,7 @@ object ForumController extends mvc.Controller {
   }
 
 
-  def saveCategory = StaffPostJsonAction(maxLength = 1000) { request =>
+  def saveCategory = StaffPostJsonAction(maxBytes = 1000) { request =>
     val body = request.body
     val sectionPageId = (body \ "sectionPageId").as[PageId]
     val unlisted = (body \ "unlisted").asOpt[Boolean].getOrElse(false)
@@ -114,12 +114,12 @@ object ForumController extends mvc.Controller {
   }
 
 
-  def deleteCategory = AdminPostJsonAction(maxLength = 200) { request =>
+  def deleteCategory = AdminPostJsonAction(maxBytes = 200) { request =>
     deleteUndeleteCategory(request, delete = true)
   }
 
 
-  def undeleteCategory = AdminPostJsonAction(maxLength = 200) { request =>
+  def undeleteCategory = AdminPostJsonAction(maxBytes = 200) { request =>
     deleteUndeleteCategory(request, delete = false)
   }
 
@@ -162,10 +162,10 @@ object ForumController extends mvc.Controller {
   def listTopicsByUser(userId: UserId) = GetAction { request =>
     val caller = request.user
     val isStaffOrSelf = caller.exists(_.isStaff) || caller.exists(_.id == userId)
-    val topicsInclForbidden = request.dao.listPagesByUser(
+    val topicsInclForbidden = request.dao.loadPagesByUser(
       userId, isStaffOrSelf = isStaffOrSelf, limit = 200)
     val topics = topicsInclForbidden filter { page: PagePathAndMeta =>
-      request.dao.maySeePageUseCache(page.meta, caller)._1
+      request.dao.maySeePageUseCache(page.meta, caller, maySeeUnlisted = isStaffOrSelf)._1
     }
     makeTopicsReply(topics, request.dao)
   }
@@ -228,7 +228,7 @@ object ForumController extends mvc.Controller {
         includeDescendantCategories: Boolean, isStaff: Boolean, restrictedOnly: Boolean,
         limit: Int = NumTopicsToList)
         : Seq[PagePathAndMeta] = {
-    var topics: Seq[PagePathAndMeta] = dao.listPagesInCategory(
+    var topics: Seq[PagePathAndMeta] = dao.loadPagesInCategory(
       categoryId, includeDescendantCategories, isStaff = isStaff, restrictedOnly = restrictedOnly,
       pageQuery, limit)
 
@@ -241,7 +241,7 @@ object ForumController extends mvc.Controller {
     // If sorting by bump time, sort pinned topics first. Otherwise, don't.
     val topicsInclPinned = pageQuery.orderOffset match {
       case orderOffset: PageOrderOffset.ByBumpTime if orderOffset.offset.isEmpty =>
-        val pinnedTopics = dao.listPagesInCategory(
+        val pinnedTopics = dao.loadPagesInCategory(
           categoryId, includeDescendantCategories, isStaff = isStaff, restrictedOnly = restrictedOnly,
           pageQuery.copy(orderOffset = PageOrderOffset.ByPinOrderLoadOnlyPinned), limit)
         val notPinned = topics.filterNot(topic => pinnedTopics.exists(_.id == topic.id))

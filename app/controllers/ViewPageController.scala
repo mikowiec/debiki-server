@@ -64,16 +64,17 @@ object ViewPageController extends mvc.Controller {
     val posts = for {
       post <- postsInclForbidden
       pageMeta <- pageMetaById.get(post.pageId)
-      if dao.maySeePostUseCache(post, pageMeta, caller)._1
+      if dao.maySeePostUseCache(post, pageMeta, caller,
+          maySeeUnlistedPages = callerIsStaffOrAuthor)._1
     } yield post
 
     val pageIds = posts.map(_.pageId).distinct
     val pageStuffById = dao.getPageStuffById(pageIds)
-    val tagsByPostId = dao.readOnlyTransaction(_.loadTagsByPostId(posts.map(_.uniqueId)))
+    val tagsByPostId = dao.readOnlyTransaction(_.loadTagsByPostId(posts.map(_.id)))
 
     val postsJson = posts flatMap { post =>
       val pageMeta = pageMetaById.get(post.pageId) getOrDie "EdE2KW07E"
-      val tags = tagsByPostId.getOrElse(post.uniqueId, Set.empty)
+      val tags = tagsByPostId.getOrElse(post.id, Set.empty)
       var postJson = ReactJson.postToJsonOutsidePage(post, pageMeta.pageRole,
         showHidden = true, includeUnapproved = callerIsStaffOrAuthor, tags)
 
@@ -99,7 +100,7 @@ object ViewPageController extends mvc.Controller {
     // Similar to viewPageImpl, keep in sync. [7PKW0YZ2]
 
     val dao = request.dao
-    val siteSettings = dao.loadWholeSiteSettings()
+    val siteSettings = dao.getWholeSiteSettings()
     val authenticationRequired = siteSettings.userMustBeAuthenticated ||
       siteSettings.userMustBeApproved
 
@@ -130,7 +131,7 @@ object ViewPageController extends mvc.Controller {
   }
 
 
-  def markPageAsSeen(pageId: PageId) = PostJsonAction(NoRateLimits, maxLength = 2) { request =>
+  def markPageAsSeen(pageId: PageId) = PostJsonAction(NoRateLimits, maxBytes = 2) { request =>
     val watchbar = request.dao.getOrCreateWatchbar(request.theUserId)
     val newWatchbar = watchbar.markPageAsSeen(pageId)
     request.dao.saveWatchbar(request.theUserId, newWatchbar)
@@ -152,7 +153,7 @@ object ViewPageController extends mvc.Controller {
 
     val dao = request.dao
     val user = request.user
-    val siteSettings = dao.loadWholeSiteSettings()
+    val siteSettings = dao.getWholeSiteSettings()
     val authenticationRequired = siteSettings.userMustBeAuthenticated ||
       siteSettings.userMustBeApproved
 
@@ -231,7 +232,7 @@ object ViewPageController extends mvc.Controller {
 
 
   private def doRenderPage(request: PageGetRequest): Future[Result] = {
-    var pageHtml = request.dao.renderPage(request)
+    var pageHtml = request.dao.renderPageMaybeUseCache(request)
 
     {
       val usersOnlineStuff = request.dao.loadUsersOnlineStuff() // could do asynchronously later

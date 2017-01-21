@@ -41,7 +41,7 @@ object UserController extends mvc.Controller {
     var onlyPendingApproval = false
     whichUsers match {
       case "ActiveUsers" =>
-        onlyApproved = request.dao.loadWholeSiteSettings().userMustBeApproved
+        onlyApproved = request.dao.getWholeSiteSettings().userMustBeApproved
       case "NewUsers" =>
         onlyPendingApproval = true
     }
@@ -102,13 +102,28 @@ object UserController extends mvc.Controller {
     if (emailOrUsername.contains("@") && !callerIsAdmin)
       throwForbidden("EsE4UPYW2", "Lookup by email not allowed")
 
-    if (emailOrUsername.contains("@"))
+    val isEmail = emailOrUsername.contains("@")
+    if (isEmail)
       throwNotImplemented("EsE5KY02", "Lookup by email not implemented")
 
     request.dao.readOnlyTransaction { transaction =>
       val member = transaction.loadMemberInclDetailsByUsername(emailOrUsername) getOrElse {
-        throwNotFound("EsE4PYW20", "User not found")
+        if (isEmail)
+          throwNotFound("EsE4PYW20", "User not found")
+
+        // Username perhaps changed? Then ought to update the url, browser side [8KFU24R]
+        val possibleUserIds = transaction.loadUsernameUsages(emailOrUsername).map(_.userId).toSet
+        if (possibleUserIds.isEmpty)
+          throwNotFound("EsEZ6F0U", "User not found")
+
+        if (possibleUserIds.size > 1)
+          throwNotFound("EsE4AK7B", "Many users with this username, weird")
+
+        val userId = possibleUserIds.head
+        transaction.loadMemberInclDetails(userId) getOrElse throwNotFound(
+          "EsE8PKU02", "User not found")
       }
+
       val callerIsUserHerself = request.user.exists(_.id == member.id)
       jsonForCompleteUser(member, Map.empty, callerIsAdmin = callerIsAdmin,
           callerIsStaff = callerIsStaff, callerIsUserHerself = callerIsUserHerself)
@@ -181,7 +196,7 @@ object UserController extends mvc.Controller {
   }
 
 
-  def approveRejectUser = StaffPostJsonAction(maxLength = 100) { request =>
+  def approveRejectUser = StaffPostJsonAction(maxBytes = 100) { request =>
     val userId = (request.body \ "userId").as[UserId]
     val doWhat = (request.body \ "doWhat").as[String]
     doWhat match {
@@ -196,7 +211,7 @@ object UserController extends mvc.Controller {
   }
 
 
-  def setIsAdminOrModerator = AdminPostJsonAction(maxLength = 100) { request =>
+  def setIsAdminOrModerator = AdminPostJsonAction(maxBytes = 100) { request =>
     val userId = (request.body \ "userId").as[UserId]
     val doWhat = (request.body \ "doWhat").as[String]
     doWhat match {
@@ -215,7 +230,7 @@ object UserController extends mvc.Controller {
   }
 
 
-  def lockThreatLevel = StaffPostJsonAction(maxLength = 100) { request =>
+  def lockThreatLevel = StaffPostJsonAction(maxBytes = 100) { request =>
     val userId = (request.body \ "userId").as[UserId]
     val threatLevelInt = (request.body \ "threatLevel").as[Int]
     val threatLevel = ThreatLevel.fromInt(threatLevelInt) getOrElse throwBadRequest(
@@ -230,7 +245,7 @@ object UserController extends mvc.Controller {
   }
 
 
-  def unlockThreatLevel = StaffPostJsonAction(maxLength = 100) { request =>
+  def unlockThreatLevel = StaffPostJsonAction(maxBytes = 100) { request =>
     val userId = (request.body \ "userId").as[UserId]
     if (User.isMember(userId)) {
       request.dao.lockMemberThreatLevel(userId, None)
@@ -242,7 +257,7 @@ object UserController extends mvc.Controller {
   }
 
 
-  def suspendUser = StaffPostJsonAction(maxLength = 300) { request =>
+  def suspendUser = StaffPostJsonAction(maxBytes = 300) { request =>
     val userId = (request.body \ "userId").as[UserId]
     val numDays = (request.body \ "numDays").as[Int]
     val reason = (request.body \ "reason").as[String]
@@ -258,7 +273,7 @@ object UserController extends mvc.Controller {
   }
 
 
-  def unsuspendUser = StaffPostJsonAction(maxLength = 100) { request =>
+  def unsuspendUser = StaffPostJsonAction(maxBytes = 100) { request =>
     val userId = (request.body \ "userId").as[UserId]
     if (isGuestId(userId))
       throwBadReq("DwE7GPKU8", "Cannot unsuspend guest user ids")
@@ -267,8 +282,8 @@ object UserController extends mvc.Controller {
   }
 
 
-  def blockGuest = StaffPostJsonAction(maxLength = 100) { request =>
-    val postId = (request.body \ "postId").as[UniquePostId]
+  def blockGuest = StaffPostJsonAction(maxBytes = 100) { request =>
+    val postId = (request.body \ "postId").as[PostId]
     val numDays = -1 // (request.body \ "numDays").as[Int] // currently no longer in use
     val threatLevel = ThreatLevel.fromInt((request.body \ "threatLevel").as[Int]).getOrElse(
       throwBadArgument("EsE8GY2W", "threatLevel"))
@@ -277,18 +292,19 @@ object UserController extends mvc.Controller {
   }
 
 
-  def unblockGuest = StaffPostJsonAction(maxLength = 100) { request =>
-    val postId = (request.body \ "postId").as[UniquePostId]
+  def unblockGuest = StaffPostJsonAction(maxBytes = 100) { request =>
+    val postId = (request.body \ "postId").as[PostId]
     request.dao.unblockGuest(postId, unblockerId = request.theUserId)
     Ok
   }
 
 
-  def loadAuthorBlocks(postId: String) = GetAction { request =>
-    val postIdInt = Try(postId.toInt) getOrElse throwBadReq("DwE4WK78", "Bad post id")
-    val blocks: Seq[Block] = request.dao.loadAuthorBlocks(postIdInt)
+  /** If not staff, returns a summary only.
+    */
+  def loadAuthorBlocks(postId: Int) = GetAction { request =>
+    val blocks: Seq[Block] = request.dao.loadAuthorBlocks(postId)
     var json = blocksSummaryJson(blocks, request.ctime)
-    if (request.user.map(_.isStaff) == Some(true)) {
+    if (request.user.exists(_.isStaff)) {
       json += "blocks" -> JsArray(blocks map blockToJson)
     }
     OkSafeJson(json)
@@ -368,7 +384,7 @@ object UserController extends mvc.Controller {
   }
 
 
-  def savePageNotfLevel = PostJsonAction(RateLimits.ConfigUser, maxLength = 500) { request =>
+  def savePageNotfLevel = PostJsonAction(RateLimits.ConfigUser, maxBytes = 500) { request =>
     val body = request.body
     val pageId = (body \ "pageId").as[PageId]
     val newNotfLevelInt = (body \ "pageNotfLevel").as[Int]
@@ -415,17 +431,17 @@ object UserController extends mvc.Controller {
   }
 
 
-  def saveUserPreferences = PostJsonAction(RateLimits.ConfigUser, maxLength = 1000) { request =>
+  def saveUserPreferences = PostJsonAction(RateLimits.ConfigUser, maxBytes = 1000) { request =>
     val prefs = userPrefsFromJson(request.body)
     val staffOrSelf = request.theUser.isStaff || request.theUserId == prefs.userId
     if (!staffOrSelf)
       throwForbidden("DwE15KFE5", "Not your preferences")
-    request.dao.saveRolePreferences(prefs)
+    request.dao.saveMemberPreferences(prefs, request.who)
     Ok
   }
 
 
-  def saveGuest = StaffPostJsonAction(maxLength = 300) { request =>
+  def saveGuest = StaffPostJsonAction(maxBytes = 300) { request =>
     val guestId = (request.body \ "guestId").as[UserId]
     val name = (request.body \ "name").as[String].trim
     if (name.isEmpty)
@@ -501,7 +517,7 @@ object UserController extends mvc.Controller {
     Json.obj(
       "pageUrl" -> s"/-${actionInfo.pageId}", // redirects to the page
       "pageTitle" -> JsString(actionInfo.pageTitle),
-      "postId" -> JsNumber(actionInfo.postNr),
+      "postId" -> JsNumber(actionInfo.postId), & nr ?
       "actionId" -> JsNumber(actionInfo.actionId),
       "actingUserId" -> JsNumber(actionInfo.actingUserId),
       "actingUserDisplayName" -> JsString(actionInfo.actingUserDisplayName),

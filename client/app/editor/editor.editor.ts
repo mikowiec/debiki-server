@@ -44,9 +44,6 @@ var $: any = window['jQuery'];
 var WritingSomethingWarningKey = 'WritingSth';
 var WritingSomethingWarning = "You were writing something?";
 
-var getErrorDialog = function(): any {
-  debiki2.util.makeStupidDialogGetter();
-};
 
 
 export function getOrCreateEditor(success) {
@@ -89,7 +86,7 @@ export var Editor = createComponent({
       text: '',
       draft: '',
       safePreviewHtml: '',
-      replyToPostIds: [],
+      replyToPostNrs: [],
       editingPostId: null,
       editingPostUid: null,
       messageToUserIds: [],
@@ -322,7 +319,7 @@ export var Editor = createComponent({
   toggleWriteReplyToPost: function(postId: number, anyPostType?: number) {
     if (this.alertBadState('WriteReply'))
       return;
-    var postIds = this.state.replyToPostIds;
+    var postIds = this.state.replyToPostNrs;
     var index = postIds.indexOf(postId);
     if (index === -1) {
       postIds.push(postId);
@@ -338,14 +335,14 @@ export var Editor = createComponent({
     }
     this.setState({
       anyPostType: postType,
-      replyToPostIds: postIds,
+      replyToPostNrs: postIds,
       text: this.state.text || this.state.draft || '',
     });
     if (!postIds.length) {
       this.closeEditor();
     }
     var writingWhat = WritingWhat.ReplyToNotOriginalPost;
-    if (_.isEqual([BodyId], postIds)) writingWhat = WritingWhat.ReplyToOriginalPost;
+    if (_.isEqual([BodyNr], postIds)) writingWhat = WritingWhat.ReplyToOriginalPost;
     else if (_.isEqual([NoPostId], postIds)) writingWhat = WritingWhat.ChatComment;
     this.loadGuidelines(writingWhat);
   },
@@ -416,7 +413,7 @@ export var Editor = createComponent({
     // No guidelines for chat messages, because usually a smaller "inline" editor is used instead.
   },
 
-  openToWriteMessage: function(userId: number) {
+  openToWriteMessage: function(userId: UserId) {
     if (this.alertBadState())
       return;
     this.showEditor();
@@ -444,8 +441,8 @@ export var Editor = createComponent({
     setTimeout(fadeBackdrop, 1400);
   },
 
-  scrollPostIntoView: function(postId) {
-    debiki.internal.showAndHighlightPost($('#post-' + postId), {
+  scrollPostIntoView: function(postNr) {
+    debiki.internal.showAndHighlightPost($('#post-' + postNr), {
       marginTop: reactelements.getTopbarHeightInclShadow(),
       // Add + X so one sees the Reply button and a bit below the post.
       marginBottom: this.refs.editor.clientHeight + 90,
@@ -453,7 +450,7 @@ export var Editor = createComponent({
   },
 
   alertBadState: function(wantsToDoWhat = null) {
-    if (wantsToDoWhat !== 'WriteReply' && this.state.replyToPostIds.length > 0) {
+    if (wantsToDoWhat !== 'WriteReply' && this.state.replyToPostNrs.length > 0) {
       alert('Please first finish writing your post');
       return true;
     }
@@ -602,7 +599,7 @@ export var Editor = createComponent({
       return;
 
     // (COULD verify still edits same post/thing, or not needed?)
-    var isEditingBody = this.state.editingPostId === d.i.BodyId;
+    var isEditingBody = this.state.editingPostId === d.i.BodyNr;
     var sanitizerOpts = {
       allowClassAndIdAttr: true, // isEditingBody, SECURITY SHOULD use another sanitizer [7FPKE02]
       // and whitelist CSS classes and ids? Right now it'll be a little bit possible to
@@ -668,7 +665,7 @@ export var Editor = createComponent({
 
   saveNewPost: function() {
     this.throwIfBadTitleOrText(null, "Please write something.");
-    Server.saveReply(this.state.replyToPostIds, this.state.text, this.state.anyPostType, () => {
+    Server.saveReply(this.state.replyToPostNrs, this.state.text, this.state.anyPostType, () => {
       this.callOnDoneCallback(true);
       this.clearTextAndClose();
     });
@@ -718,7 +715,7 @@ export var Editor = createComponent({
       this.setState({ showTextErrors: true });
     }
     if (errors) {
-      getErrorDialog().open({ body: errors });
+      util.openDefaultStupidDialog({ body: errors });
       throw 'Bad title or text. Not saving this to the server. [EsM7KCW]';
     }
   },
@@ -769,7 +766,7 @@ export var Editor = createComponent({
     this.returnSpaceAtBottomForEditor();
     this.setState({
       visible: false,
-      replyToPostIds: [],
+      replyToPostNrs: [],  // post nr for sure, not post id
       editingPostId: null,
       editingPostUid: null,
       isWritingChatMessage: false,
@@ -847,6 +844,7 @@ export var Editor = createComponent({
     var state = this.state;
     var store: Store = state.store;
     var me: Myself = store.me;
+    let settings: SettingsVisibleClientSide = store.settings;
     var isPrivateGroup = page_isPrivateGroup(this.state.newPageRole);
 
     var guidelines = state.guidelines;
@@ -889,25 +887,26 @@ export var Editor = createComponent({
               type: 'text', ref: 'titleInput', tabIndex: 1, onChange: this.onTitleEdited,
               placeholder: "Type a title — what is this about, in one brief sentence?" });
 
-      if (this.state.newForumTopicCategoryId && !isPrivateGroup)
+      if (this.state.newForumTopicCategoryId && !isPrivateGroup &&
+          settings_showCategories(settings, me))
         categoriesDropdown =
           SelectCategoryDropdown({ className: 'esEdtr_titleEtc_category', store: store,
               selectedCategoryId: this.state.newForumTopicCategoryId,
               onCategorySelected: this.changeCategory });
 
-      if (this.state.newPageRole) {
+      if (this.state.newPageRole && settings_selectTopicType(settings, me)) {
         pageRoleDropdown = PageRoleDropdown({ store: store, pageRole: this.state.newPageRole,
-            complicated: store.settings.showComplicatedStuff,
+            complicated: store.settings.showExperimental,
             onSelect: this.changeNewForumPageRole,
             title: 'Topic type', className: 'esEdtr_titleEtc_pageRole' });
       }
     }
 
     let editingPostId = this.state.editingPostId;
-    let replyToPostIds = this.state.replyToPostIds;
-    let isOrigPostReply = _.isEqual([BodyId], replyToPostIds);
-    let isChatComment = replyToPostIds.length === 1 && replyToPostIds[0] === NoPostId;
-    let isChatReply = replyToPostIds.indexOf(NoPostId) !== -1 && !isChatComment;
+    let replyToPostNrs = this.state.replyToPostNrs;
+    let isOrigPostReply = _.isEqual([BodyNr], replyToPostNrs);
+    let isChatComment = replyToPostNrs.length === 1 && replyToPostNrs[0] === NoPostId;
+    let isChatReply = replyToPostNrs.indexOf(NoPostId) !== -1 && !isChatComment;
 
     var doingWhatInfo;
     if (_.isNumber(editingPostId)) {
@@ -946,7 +945,7 @@ export var Editor = createComponent({
       }
       doingWhatInfo = what + ":";
     }
-    else if (replyToPostIds.length === 0) {
+    else if (replyToPostNrs.length === 0) {
       doingWhatInfo = 'Please select one or more posts to reply to.';
     }
     else if (isChatComment) {
@@ -958,17 +957,17 @@ export var Editor = createComponent({
     else if (isOrigPostReply && page_isUsabilityTesting(store.pageRole)) { // [plugin]
       doingWhatInfo = "Your usability testing video link + description:";
     }
-    else if (replyToPostIds.length > 0) {
+    else if (replyToPostNrs.length > 0) {
       doingWhatInfo =
         r.span({},
           isChatReply ? 'Chat reply to ' : 'Reply to ',
-          _.filter(replyToPostIds, (id) => id !== NoPostId).map((postId, index) => {
+          _.filter(replyToPostNrs, (id) => id !== NoPostId).map((postNr, index) => {
             var anyAnd = index > 0 ? ' and ' : '';
-            var whichPost = postId === 1 ? 'the Original Post' : 'post ' + postId;
+            var whichPost = postNr === 1 ? 'the Original Post' : 'post ' + postNr;
             return (
-              r.span({ key: postId },
+              r.span({ key: postNr },
                 anyAnd,
-                r.a({ onClick: () => this.scrollPostIntoView(postId) }, whichPost)));
+                r.a({ onClick: () => this.scrollPostIntoView(postNr) }, whichPost)));
           }),
           ':');
     }
@@ -983,7 +982,7 @@ export var Editor = createComponent({
     if (_.isNumber(this.state.editingPostId)) {
       saveButtonTitle = makeSaveTitle("Save", " edits");
     }
-    else if (replyToPostIds.length) {
+    else if (replyToPostNrs.length) {
       if (isChatComment) {
         saveButtonTitle = makeSaveTitle("Post", " comment");
       }

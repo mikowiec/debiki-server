@@ -22,10 +22,10 @@ var FirstSiteId = '1';
 
 var NoPostId = -1;  // dupl in reply.js
 var TitleNr = 0;
-var BodyId = 1;
 var BodyNr = 1;
 var FirstReplyNr = 2;
 
+let NoUserId = 0;
 var SystemUserId = -1;
 var MinMemberId = SystemUserId;
 

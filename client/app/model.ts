@@ -43,20 +43,18 @@ type HttpRequest = XMLHttpRequest
 type ErrorPolicy = number | void;
 var IgnoreThisError: ErrorPolicy = -112233;
 
-var TitleId = 0;
-var BodyPostId = 1;
 
 
 interface PostToModerate {
   pageId: string;
   pageName: string;
-  id: number;
+  id: number;   // rename to nr? CLEAN_UP
   status: string;
   type: string;
   cdati: string;
   approvedText?: string;
   unapprovedText?: string;
-  userId: string;
+  userId: UserId;
   userDisplayName: string;
   numEditsToReview?: string;
   numHandledFlags?: number;
@@ -121,14 +119,12 @@ interface Flag {
 
 
 interface Post {
-  uniqueId: number; // TODO rename to id
-  postId: number;   // TODO rename to nr
-  parentId: number;
-  multireplyPostIds: number[];
+  uniqueId: number; // CLEAN_UP RENAME to id
+  nr: number;
+  parentNr: number;
+  multireplyPostNrs: number[];
   postType?: PostType;
-  // these author* are deprecated, should add an author: {...} object instead.
-  authorId: string; // COULD change to int and then rename authorIdInt below to authorId.
-  authorIdInt: number;
+  authorId: UserId;
   createdAtMs: number;
   lastApprovedEditAtMs: number;
   numEditors: number;
@@ -184,8 +180,7 @@ interface PostRevision {
 
 
 interface Myself {
-  id?: number;
-  userId?: number;  // change to `id`
+  id?: UserId;
   isLoggedIn?: boolean;
   isAdmin?: boolean;
   isModerator?: boolean;
@@ -212,14 +207,14 @@ interface Myself {
   restrictedTopics: Topic[];
   restrictedCategories: Category[];
 
-  votes: any;
+  votes: any; // RENAME to votesByPostNr?   CLEAN_UP also see just below:  id or nr
   unapprovedPosts: { [id: number]: Post };
   unapprovedPostAuthors: BriefUser[];
-  postIdsAutoReadLongAgo: number[];
-  postIdsAutoReadNow: number[];
-  marksByPostId: { [postId: number]: any };
+  postIdsAutoReadLongAgo: number[];           // id or nr?
+  postIdsAutoReadNow: number[];               // id or nr?
+  marksByPostId: { [postId: number]: any };   // id or nr?
   pageHelpMessage?: HelpMessage;
-  closedHelpMessages: { [id: string]: number };  // id --> closed version of message
+  closedHelpMessages: { [id: string]: number };  // id --> closed version of message   — id or nr?
 }
 
 
@@ -353,7 +348,7 @@ interface Store {
   isFirstSiteAdminEmailMissing?: boolean;
   userMustBeAuthenticated: boolean;
   userMustBeApproved: boolean;
-  settings: SiteSettings;
+  settings: SettingsVisibleClientSide;
   pageMemberIds: UserId[];
   pageId: string;
   forumId?: string;
@@ -394,9 +389,10 @@ interface Store {
   userSpecificDataAdded?: boolean; // is always false, server side
   newUserAccountCreated?: boolean;
   isImpersonating?: boolean;
+  isViewingAs?: boolean;
   rootPostId: number;
   usersByIdBrief: { [userId: number]: BriefUser };
-  allPosts: { [postNr: number]: Post };
+  postsByNr: { [postNr: number]: Post };
   topLevelCommentIdsSorted: number[];
   isWatchbarOpen: boolean;
   isContextbarOpen: boolean;
@@ -418,13 +414,17 @@ interface Store {
 }
 
 
-interface SiteSettings {
-  inviteOnly: boolean;
-  allowSignup: boolean;
-  allowLocalSignup: boolean;
-  allowGuestLogin: boolean;
-  showComplicatedStuff: boolean;
-  numFlagsToHidePost: number;
+// Default settings: [8L4KWU02]
+interface SettingsVisibleClientSide {
+  inviteOnly?: boolean;                 // default: false
+  allowSignup?: boolean;                // default: true
+  allowLocalSignup?: boolean;           // default: true
+  allowGuestLogin?: boolean;            // default: false
+  showExperimental?: boolean;           // default: false
+  showCategories?: boolean;             // default: true
+  showTopicFilterButton?: boolean;      // default: true
+  showTopicTypes?: boolean;             // default: true
+  selectTopicType?: boolean;            // default: true
 }
 
 
@@ -488,7 +488,7 @@ interface SpecialContent {
 
 
 interface Guest {
-  id: any;  // TODO change to number, and User.userId too
+  id: UserId;
   fullName: string;
   email: string;
   country: string;
@@ -497,7 +497,7 @@ interface Guest {
 
 
 interface BriefUser {
-  id: number;
+  id: UserId;
   fullName: string;
   username?: string;
   isAdmin?: boolean;
@@ -509,8 +509,8 @@ interface BriefUser {
 }
 
 
-interface CompleteUser {
-  id: any;  // TODO change to number, and User.userId too
+interface MemberInclDetails {
+  id: UserId;
   createdAtEpoch: number;  // change to millis
   username: string;
   fullName: string;
@@ -552,13 +552,14 @@ interface UsersHere {
 
 interface Invite {
   invitedEmailAddress: string;
-  invitedById: number;
+  invitedById: UserId;
   createdAtEpoch: number;  // change to millis
+  createdById: UserId;
   acceptedAtEpoch?: number;  // change to millis
   invalidatedAtEpoch?: number;  // change to millis
   deletedAtEpoch?: number;  // change to millis
-  deletedById?: number;
-  userId?: number;
+  deletedById?: UserId;
+  userId?: UserId;
   // Later:
   /*
   userFullName?: string;
@@ -674,6 +675,12 @@ interface Settings {
   numFirstPostsToApprove: number;
   numFirstPostsToReview: number;
 
+  // Simpify
+  showCategories: boolean;
+  showTopicFilterButton: boolean;
+  showTopicTypes: boolean;
+  selectTopicType: boolean;
+
   // Spam
   numFlagsToHidePost: number;
   cooldownMinutesAfterFlaggedHidden: number;
@@ -704,7 +711,7 @@ interface Settings {
 
   googleUniversalAnalyticsTrackingId: string;
 
-  showComplicatedStuff: boolean;
+  showExperimental: boolean;
 }
 
 

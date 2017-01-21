@@ -71,7 +71,7 @@ object TagsController extends p.mvc.Controller {
   }
 
 
-  def setTagNotfLevel = PostJsonAction(RateLimits.ConfigUser, maxLength = 500) { request =>
+  def setTagNotfLevel = PostJsonAction(RateLimits.ConfigUser, maxBytes = 500) { request =>
     val body = request.body
     val tagLabel = (body \ "tagLabel").as[String]
     val notfLevelInt = (body \ "notfLevel").as[Int]
@@ -83,9 +83,9 @@ object TagsController extends p.mvc.Controller {
   }
 
 
-  def addRemoveTags = PostJsonAction(RateLimits.EditPost, maxLength = 5000) { request =>
+  def addRemoveTags = PostJsonAction(RateLimits.EditPost, maxBytes = 5000) { request =>
     val pageId = (request.body \ "pageId").as[PageId]
-    val postId = (request.body \ "postId").as[UniquePostId]
+    val postId = (request.body \ "postId").as[PostId]  // yes id not nr
     val tags = (request.body \ "tags").as[Set[TagLabel]]
     val patch = request.dao.addRemoveTagsIfAuth(pageId, postId, tags, request.who)
     OkSafeJson(patch) // or skip? or somehow include tags *only*? [5GKU0234]

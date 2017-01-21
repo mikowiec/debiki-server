@@ -43,7 +43,7 @@ object ImportExportController extends mvc.Controller {
 
 
   def importSiteJson(deleteOldSite: Option[Boolean]) =
-        PostJsonAction(RateLimits.NoRateLimits, maxLength = 9999) { request =>
+        PostJsonAction(RateLimits.CreateSite, maxBytes = 1001000) { request =>
 
     val okE2ePassword = hasOkE2eTestPassword(request.request)
     if (!okE2ePassword)
@@ -193,8 +193,13 @@ object ImportExportController extends mvc.Controller {
 
       transaction.upsertSiteSettings(siteData.settings)
 
+      // ... insert old usernames too ...
+
       siteData.users foreach { user =>
-        transaction.insertAuthenticatedUser(user)
+        transaction.insertMember(user)
+        // [readlater] export & import username usages, later. For now, create new here.
+        transaction.insertUsernameUsage(UsernameUsage(
+          username = user.username, inUseFrom = transaction.now, userId = user.id))
       }
       siteData.pages foreach { pageMeta =>
         //val newId = transaction.nextPageId()
@@ -290,6 +295,12 @@ object ImportExportController extends mvc.Controller {
         isOwner = readOptBool(jsObj, "isOwner") getOrElse false,
         isAdmin = readOptBool(jsObj, "isAdmin") getOrElse false,
         isModerator = readOptBool(jsObj, "isModerator") getOrElse false,
+        trustLevel = readOptInt(jsObj, "trustLevel").flatMap(TrustLevel.fromInt)
+                      .getOrElse(TrustLevel.New),
+        lockedTrustLevel = readOptInt(jsObj, "lockedTrustLevel").flatMap(TrustLevel.fromInt),
+        threatLevel = readOptInt(jsObj, "threatLevel").flatMap(ThreatLevel.fromInt)
+                        .getOrElse(ThreatLevel.HopefullySafe),
+        lockedThreatLevel = readOptInt(jsObj, "lockedThreatLevel").flatMap(ThreatLevel.fromInt),
         suspendedAt = readOptDateMs(jsObj, "suspendedAtMs"),
         suspendedTill = readOptDateMs(jsObj, "suspendedTillMs"),
         suspendedById = readOptInt(jsObj, "suspendedById"),
@@ -413,7 +424,8 @@ object ImportExportController extends mvc.Controller {
         createdAt = readDateMs(jsObj, "createdAtMs"),
         updatedAt = readDateMs(jsObj, "updatedAtMs"),
         lockedAt = readOptDateMs(jsObj, "lockedAtMs"),
-        frozenAt = readOptDateMs(jsObj, "frozenAtMs")))
+        frozenAt = readOptDateMs(jsObj, "frozenAtMs"),
+        deletedAt = readOptDateMs(jsObj, "deletedAtMs")))
     }
     catch {
       case ex: IllegalArgumentException =>
@@ -452,7 +464,7 @@ object ImportExportController extends mvc.Controller {
 
     try {
       Good(Post(
-        uniqueId = readInt(jsObj, "id"),
+        id = readInt(jsObj, "id"),
         pageId = readString(jsObj, "pageId"),
         nr = readInt(jsObj, "nr"),
         parentNr = readOptInt(jsObj, "parentNr"),
@@ -506,7 +518,7 @@ object ImportExportController extends mvc.Controller {
 
 
   /* Later: Need to handle file uploads / streaming, so can import e.g. images.
-  def importSite(siteId: SiteId) = PostFilesAction(RateLimits.NoRateLimits, maxLength = 9999) {
+  def importSite(siteId: SiteId) = PostFilesAction(RateLimits.NoRateLimits, maxBytes = 9999) {
         request =>
 
     SEC URITY ; MU ST // auth. Disable unless e2e.

@@ -73,17 +73,17 @@ object EditController extends mvc.Controller {
 
 
   /** Sends back a post's current CommonMark source to the browser.
+    * SHOULD change to pageId + postId (not postNr)  [idnotnr]
     */
-  def loadCurrentText(pageId: String, postId: String) = GetAction { request =>
-    val postNrAsInt = parseIntOrThrowBadReq(postId, "DwE1Hu80")
-    val post = request.dao.loadPost(pageId, postNrAsInt) getOrElse
+  def loadCurrentText(pageId: String, postNr: Int) = GetAction { request =>
+    val post = request.dao.loadPost(pageId, postNr) getOrElse
       throwNotFound("DwE7SKE3", "Post not found")
 
     if (!debiki.dao.PostsDao.userMayEdit(request.theUser, post))
       throwForbidden("DwE8FKY0", "Not your post")
 
     OkSafeJson(Json.obj(
-      "postUid" -> post.uniqueId,
+      "postUid" -> post.id,
       "currentText" -> post.currentSource,
       "currentRevisionNr" -> post.currentRevisionNr))
   }
@@ -91,10 +91,10 @@ object EditController extends mvc.Controller {
 
   /** Edits posts.
     */
-  def edit = PostJsonAction(RateLimits.EditPost, maxLength = MaxPostSize) {
+  def edit = PostJsonAction(RateLimits.EditPost, maxBytes = MaxPostSize) {
         request: JsonPostRequest =>
     val pageId = (request.body \ "pageId").as[PageId]
-    val postNr = (request.body \ "postId").as[PostNr]
+    val postNr = (request.body \ "postNr").as[PostNr] ; SHOULD // change to id, in case moved to other page [idnotnr]
     val newText = (request.body \ "text").as[String]
 
     if (postNr == PageParts.TitleNr)
@@ -128,13 +128,12 @@ object EditController extends mvc.Controller {
   }
 
 
-  def loadPostRevisions(postId: String, revisionNr: String) = GetAction { request =>
-    val postIdInt = postId.toIntOption getOrElse throwBadRequest("DwE8FKP", "Bad post id")
+  def loadPostRevisions(postId: PostId, revisionNr: String) = GetAction { request =>
     val revisionNrInt =
       if (revisionNr == "LastRevision") PostRevision.LastRevisionMagicNr
       else revisionNr.toIntOption getOrElse throwBadRequest("EdE8UFMW2", "Bad revision nr")
     val (revisionsRecentFirst, usersById) =
-      request.dao.loadSomeRevisionsRecentFirst(postIdInt, revisionNrInt, atLeast = 5,
+      request.dao.loadSomeRevisionsRecentFirst(postId, revisionNrInt, atLeast = 5,
           userId = request.user.map(_.id))
     val revisionsJson = revisionsRecentFirst map { revision =>
       val isStaffOrComposer = request.isStaff || request.theUserId == revision.composedById
@@ -144,7 +143,7 @@ object EditController extends mvc.Controller {
   }
 
 
-  def changePostType = PostJsonAction(RateLimits.EditPost, maxLength = 100) { request =>
+  def changePostType = PostJsonAction(RateLimits.EditPost, maxBytes = 100) { request =>
     val pageId = (request.body \ "pageId").as[PageId]
     val postNr = (request.body \ "postNr").as[PostNr]
     val newTypeInt = (request.body \ "newType").as[Int]
@@ -157,15 +156,15 @@ object EditController extends mvc.Controller {
 
 
   // Staff only, *for now*.
-  def editPostSettings = StaffPostJsonAction(maxLength = 100) { request =>
-    val postId = (request.body \ "postId").as[UniquePostId]
+  def editPostSettings = StaffPostJsonAction(maxBytes = 100) { request =>
+    val postId = (request.body \ "postId").as[PostId]
     val branchSideways = (request.body \ "branchSideways").asOpt[Byte]
     val patch = request.dao.editPostSettings(postId, branchSideways, request.who)
     OkSafeJson(patch) // or skip? [5GKU0234]
   }
 
 
-  def deletePost = PostJsonAction(RateLimits.DeletePost, maxLength = 5000) { request =>
+  def deletePost = PostJsonAction(RateLimits.DeletePost, maxBytes = 5000) { request =>
     val pageId = (request.body \ "pageId").as[PageId]
     val postNr = (request.body \ "postNr").as[PostNr]
     val repliesToo = (request.body \ "repliesToo").as[Boolean]
@@ -181,9 +180,9 @@ object EditController extends mvc.Controller {
   }
 
 
-  def movePost = StaffPostJsonAction(maxLength = 100) { request =>
-    val pageId = (request.body \ "pageId").as[PageId]
-    val postId = (request.body \ "postId").as[UniquePostId]
+  def movePost = StaffPostJsonAction(maxBytes = 100) { request =>
+    val pageId = (request.body \ "pageId").as[PageId]   // apparently not used
+    val postId = (request.body \ "postId").as[PostId]   // id not nr
     val newHost = (request.body \ "newHost").as[SiteId] // ignore for now though
     val newPageId = (request.body \ "newPageId").as[PageId]
     val newParentNr = (request.body \ "newParentNr").as[PostNr]
